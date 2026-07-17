@@ -24,6 +24,7 @@ import {
   updateUsername,
   updateEmail,
   updatePassword,
+  deleteUserAccount,
   UserStats,
 } from '@/services/profileService';
 import { logoutPurchasesUser, restorePurchases } from '@/services/purchasesService';
@@ -92,7 +93,7 @@ export default function ProfileTab() {
           onPress: async () => {
             showAlert(
               'Are You Sure?',
-              'Your scores, progress, and badges will be permanently deleted.',
+              'Your scores, streaks, badges, and leaderboard entries will be permanently removed.',
               [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -100,8 +101,13 @@ export default function ProfileTab() {
                   style: 'destructive',
                   onPress: async () => {
                     await logoutPurchasesUser();
+                    const { error } = await deleteUserAccount();
+                    if (error) {
+                      showAlert('Error', 'Could not delete your account. Please try again.');
+                      return;
+                    }
+                    // Session is already cleared server-side; call logout to clean up locally.
                     await logout();
-                    showAlert('Account Deleted', 'Your account has been permanently removed.');
                   },
                 },
               ]

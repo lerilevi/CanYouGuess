@@ -258,8 +258,25 @@ export const saveUserCountry = async (
 
 export const deleteUserAccount = async (): Promise<{ error: string | null }> => {
   const supabase = getSupabaseClient();
-  // Sign the user out; actual deletion should be done via a backend edge function
-  const { error } = await supabase.auth.signOut();
-  if (error) return { error: error.message };
+
+  // Call the delete-account Edge Function which uses the service role to
+  // delete the auth user and cascade-delete all associated rows
+  // (user_profiles → user_stats, user_badges, leaderboard_scores, category_scores).
+  const { error: fnError } = await supabase.functions.invoke('delete-account', { body: {} });
+
+  if (fnError) {
+    const { FunctionsHttpError } = await import('@supabase/supabase-js');
+    let msg = fnError.message;
+    if (fnError instanceof FunctionsHttpError) {
+      try {
+        const text = await fnError.context?.text();
+        msg = text ?? msg;
+      } catch { /* ignore */ }
+    }
+    return { error: msg };
+  }
+
+  // Auth user is now deleted server-side; sign out locally to clear the session.
+  await supabase.auth.signOut();
   return { error: null };
 };

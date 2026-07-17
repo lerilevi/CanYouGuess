@@ -143,6 +143,14 @@ export const updateUsername = async (userId: string, newUsername: string): Promi
 
   if (profileError) return { error: profileError.message };
 
+  // Sync username into Supabase Auth user metadata so it persists across sessions
+  const { error: authError } = await supabase.auth.updateUser({
+    data: { username: newUsername },
+  });
+  if (authError) {
+    console.warn('[updateUsername] Failed to sync auth metadata:', authError.message);
+  }
+
   // Also update username in leaderboard_scores
   await supabase
     .from('leaderboard_scores')

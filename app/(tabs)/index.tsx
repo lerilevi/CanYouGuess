@@ -236,12 +236,16 @@ export default function HomeTab() {
                   <Text style={styles.paidChipText}>Full Game</Text>
                 </View>
               ) : (
-                <View style={styles.userChip}>
+                <Pressable
+                  onPress={() => router.push('/(tabs)/profile')}
+                  style={({ pressed }) => [styles.userChip, { opacity: pressed ? 0.7 : 1 }]}
+                  hitSlop={8}
+                >
                   <MaterialIcons name="person" size={14} color={Colors.textSecondary} />
                   <Text style={styles.userChipText} numberOfLines={1}>
                     {user.username ?? user.email?.split('@')[0] ?? 'Player'}
                   </Text>
-                </View>
+                </Pressable>
               )}
             </View>
 

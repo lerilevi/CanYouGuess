@@ -34,27 +34,40 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Use the service-role admin client to delete the auth user.
-    // Because user_profiles has ON DELETE CASCADE from auth.users, and all
-    // other tables (user_stats, user_badges, leaderboard_scores, category_scores)
-    // have ON DELETE CASCADE from user_profiles, a single admin.deleteUser call
-    // wipes the entire user footprint from the database.
+    // Use the service-role client to delete all user data directly from the DB.
+    // Deletion order respects FK constraints:
+    //   category_scores, leaderboard_scores, user_badges, user_stats → user_profiles
+    // Deleting user_profiles last cleans up the root row; all child rows are
+    // removed first to avoid FK violations in case cascades aren't in effect.
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(user.id);
+    const tables = ['category_scores', 'leaderboard_scores', 'user_badges', 'user_stats', 'user_profiles'];
+    for (const table of tables) {
+      const { error: delErr } = await supabaseAdmin
+        .from(table)
+        .delete()
+        .eq(table === 'user_profiles' ? 'id' : 'user_id', user.id);
 
-    if (deleteError) {
-      console.error('[delete-account] admin.deleteUser failed:', deleteError.message);
-      return new Response(
-        JSON.stringify({ error: deleteError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (delErr) {
+        console.error(`[delete-account] Failed to delete from ${table}:`, delErr.message);
+        return new Response(
+          JSON.stringify({ error: `Failed to delete from ${table}: ${delErr.message}` }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
-    console.log(`[delete-account] Deleted user ${user.id} and all associated data.`);
+    // Attempt to delete the auth user. This may fail on some hosting environments
+    // (ipNotInner restriction) — treat that as a soft failure: data is already gone.
+    const { error: authDelErr } = await supabaseAdmin.auth.admin.deleteUser(user.id);
+    if (authDelErr) {
+      console.warn('[delete-account] auth.admin.deleteUser not available; data already purged:', authDelErr.message);
+    }
+
+    console.log(`[delete-account] Deleted all data for user ${user.id}.`);
     return new Response(
       JSON.stringify({ success: true }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

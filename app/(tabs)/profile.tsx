@@ -103,7 +103,7 @@ export default function ProfileTab() {
                     await logoutPurchasesUser();
                     const { error } = await deleteUserAccount();
                     if (error) {
-                      showAlert('Error', 'Could not delete your account. Please try again.');
+                      showAlert('Delete Error', error);
                       return;
                     }
                     // Session is already cleared server-side; call logout to clean up locally.

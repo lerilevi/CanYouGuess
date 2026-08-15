@@ -31,7 +31,7 @@ import { logoutPurchasesUser, restorePurchases } from '@/services/purchasesServi
 import { BADGES } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constants/theme';
 
-const PRIVACY_POLICY_URL = 'https://example.com/privacy';
+const PRIVACY_POLICY_URL = 'https://react-9bj8xm.onspace.build';
 const TERMS_URL = 'https://example.com/terms';
 
 type EditField = 'username' | 'email' | 'password' | null;

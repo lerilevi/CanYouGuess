@@ -5,49 +5,52 @@
  * The web stub (adService.web.ts) is automatically picked by Metro on the web
  * platform, so this file is only ever bundled for iOS/Android.
  *
- * Flow:
- *  1. initializeAds() — call once on app start; requests ATT on iOS first,
- *     then initializes the Mobile Ads SDK.
- *  2. preloadInterstitial() — loads an interstitial in the background.
- *  3. showInterstitial()   — shows the pre-loaded interstitial (fire-and-forget).
- *  4. showRewardedAd()     — loads + shows a rewarded ad; resolves true only when
- *     the user earns the reward (watched the full ad).
+ * All native imports are done lazily at call-time (not at module parse-time)
+ * so the file can be safely bundled in Live Preview without crashing.
  */
 
-import MobileAds, {
-  InterstitialAd,
-  RewardedAd,
-  AdEventType,
-  RewardedAdEventType,
-  TestIds,
-} from 'react-native-google-mobile-ads';
-import { Platform, PermissionsAndroid } from 'react-native';
+import { Platform } from 'react-native';
+
+// ─── Lazy native module access ────────────────────────────────────────────────
+
+function getNativeAds() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('react-native-google-mobile-ads') as typeof import('react-native-google-mobile-ads');
+  } catch {
+    return null;
+  }
+}
 
 // ─── Ad Unit IDs ─────────────────────────────────────────────────────────────
 
-const REWARDED_UNIT_ID: string = __DEV__
-  ? TestIds.REWARDED
-  : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID ?? TestIds.REWARDED);
+function getRewardedUnitId(): string {
+  const mod = getNativeAds();
+  const testId = mod?.TestIds?.REWARDED ?? 'ca-app-pub-3940256099942544/5224354917';
+  return __DEV__
+    ? testId
+    : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID ?? testId);
+}
 
-// Using a generic test interstitial ID for now; swap in a real unit ID when
-// you create an interstitial ad unit in AdMob.
-const INTERSTITIAL_UNIT_ID: string = __DEV__
-  ? TestIds.INTERSTITIAL
-  : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID ?? TestIds.INTERSTITIAL);
+function getInterstitialUnitId(): string {
+  const mod = getNativeAds();
+  const testId = mod?.TestIds?.INTERSTITIAL ?? 'ca-app-pub-3940256099942544/4411468910';
+  return __DEV__
+    ? testId
+    : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID ?? testId);
+}
 
 // ─── ATT permission (iOS 14+) ─────────────────────────────────────────────────
 
 async function requestTrackingPermission(): Promise<void> {
   if (Platform.OS !== 'ios') return;
   try {
-    // expo-tracking-transparency is the standard Expo wrapper for ATT
     const { requestTrackingPermissionsAsync } = await import(
       'expo-tracking-transparency'
     );
     await requestTrackingPermissionsAsync();
-  } catch (err) {
+  } catch {
     // Module not installed or not a native build — safe to ignore in preview
-    console.warn('[adService] ATT permission request unavailable:', err);
   }
 }
 
@@ -58,47 +61,50 @@ let adsInitialized = false;
 export async function initializeAds(): Promise<void> {
   if (adsInitialized) return;
 
-  // iOS: request ATT first so the SDK can use the IDFA
+  const mod = getNativeAds();
+  if (!mod) {
+    // Native module unavailable (Live Preview / web) — skip silently
+    return;
+  }
+
   await requestTrackingPermission();
 
   try {
-    await MobileAds().initialize();
+    await mod.default().initialize();
     adsInitialized = true;
-    console.log('[adService] Mobile Ads SDK initialized');
-    // Pre-load the first interstitial straight away
     preloadInterstitial();
   } catch (err) {
-    console.error('[adService] Failed to initialize Mobile Ads SDK:', err);
+    console.warn('[adService] Failed to initialize Mobile Ads SDK:', err);
   }
 }
 
 // ─── Interstitial ─────────────────────────────────────────────────────────────
 
-let interstitialAd: InterstitialAd | null = null;
+let interstitialAd: unknown = null;
 let interstitialLoaded = false;
 
 export function preloadInterstitial(): void {
+  const mod = getNativeAds();
+  if (!mod) return;
+
   try {
-    interstitialAd = InterstitialAd.createForAdRequest(INTERSTITIAL_UNIT_ID, {
+    const ad = mod.InterstitialAd.createForAdRequest(getInterstitialUnitId(), {
       requestNonPersonalizedAdsOnly: false,
     });
 
-    interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
+    ad.addAdEventListener(mod.AdEventType.LOADED, () => {
       interstitialLoaded = true;
     });
-
-    interstitialAd.addAdEventListener(AdEventType.ERROR, (err) => {
-      console.warn('[adService] Interstitial failed to load:', err);
+    ad.addAdEventListener(mod.AdEventType.ERROR, () => {
       interstitialLoaded = false;
     });
-
-    interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
+    ad.addAdEventListener(mod.AdEventType.CLOSED, () => {
       interstitialLoaded = false;
-      // Pre-load the next one after a short delay
       setTimeout(preloadInterstitial, 3000);
     });
 
-    interstitialAd.load();
+    ad.load();
+    interstitialAd = ad;
   } catch (err) {
     console.warn('[adService] preloadInterstitial error:', err);
   }
@@ -106,14 +112,16 @@ export function preloadInterstitial(): void {
 
 export function showInterstitial(): Promise<boolean> {
   return new Promise((resolve) => {
-    if (!interstitialAd || !interstitialLoaded) {
+    const mod = getNativeAds();
+    if (!mod || !interstitialAd || !interstitialLoaded) {
       resolve(false);
       return;
     }
     try {
-      interstitialAd.addAdEventListener(AdEventType.CLOSED, () => resolve(true));
-      interstitialAd.addAdEventListener(AdEventType.ERROR, () => resolve(false));
-      interstitialAd.show();
+      const ad = interstitialAd as InstanceType<typeof mod.InterstitialAd>;
+      ad.addAdEventListener(mod.AdEventType.CLOSED, () => resolve(true));
+      ad.addAdEventListener(mod.AdEventType.ERROR, () => resolve(false));
+      ad.show();
     } catch (err) {
       console.warn('[adService] showInterstitial error:', err);
       resolve(false);
@@ -125,27 +133,35 @@ export function showInterstitial(): Promise<boolean> {
 
 export function showRewardedAd(): Promise<boolean> {
   return new Promise((resolve) => {
+    const mod = getNativeAds();
+    if (!mod) {
+      // Simulate reward in dev/preview so the flow can be tested
+      if (__DEV__) {
+        setTimeout(() => resolve(true), 1000);
+      } else {
+        resolve(false);
+      }
+      return;
+    }
+
     let rewarded = false;
 
     try {
-      const ad = RewardedAd.createForAdRequest(REWARDED_UNIT_ID, {
+      const ad = mod.RewardedAd.createForAdRequest(getRewardedUnitId(), {
         requestNonPersonalizedAdsOnly: false,
       });
 
-      ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+      ad.addAdEventListener(mod.RewardedAdEventType.EARNED_REWARD, () => {
         rewarded = true;
       });
-
-      ad.addAdEventListener(AdEventType.CLOSED, () => {
+      ad.addAdEventListener(mod.AdEventType.CLOSED, () => {
         resolve(rewarded);
       });
-
-      ad.addAdEventListener(AdEventType.ERROR, (err) => {
+      ad.addAdEventListener(mod.AdEventType.ERROR, (err: unknown) => {
         console.warn('[adService] Rewarded ad error:', err);
         resolve(false);
       });
-
-      ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      ad.addAdEventListener(mod.RewardedAdEventType.LOADED, () => {
         try {
           ad.show();
         } catch (showErr) {

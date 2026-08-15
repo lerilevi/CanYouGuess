@@ -6,6 +6,7 @@ import { GameProvider } from '@/contexts/GameContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { StatusBar } from 'expo-status-bar';
 import { initializePurchases, loginPurchasesUser, logoutPurchasesUser } from '@/services/purchasesService';
+import { initializeAds } from '@/services/adService';
 
 /** Syncs RevenueCat identity whenever the auth user changes. */
 function PurchasesSync() {
@@ -27,6 +28,7 @@ export default function RootLayout() {
     // Initialize RevenueCat as early as possible (no userId yet; identity
     // is set later by PurchasesSync once auth resolves).
     initializePurchases();
+    initializeAds();
   }, []);
 
   return (

@@ -1,9 +1,9 @@
 /**
  * adService.web.ts
  *
- * Web stub for react-native-google-mobile-ads.
- * Metro automatically picks this file over adService.ts on the web platform,
- * preventing the native-only module from being bundled.
+ * Web stub — Metro automatically resolves this file over adService.ts on the
+ * web platform, preventing the native-only react-native-google-mobile-ads
+ * module from being bundled.
  */
 
 export async function initializeAds(): Promise<void> {}
@@ -15,7 +15,7 @@ export function showInterstitial(): Promise<boolean> {
 }
 
 export function showRewardedAd(): Promise<boolean> {
-  // Simulate a reward in dev so the flow can be tested on web
+  // Simulate a brief reward in dev so the flow can be exercised in browser
   if (__DEV__) {
     return new Promise((resolve) => setTimeout(() => resolve(true), 1000));
   }

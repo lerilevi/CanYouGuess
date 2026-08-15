@@ -20,16 +20,11 @@ function countryCodeToFlag(code: string): string {
 
 /**
  * Detects the user's country via IP-based geolocation (no permission required).
- * Falls back to null on any failure.
+ * Always fetches fresh from the network; falls back to the last cached value,
+ * then to null if no cache exists.
  */
 export async function detectCountryByIP(): Promise<UserCountry | null> {
   try {
-    // Check cache first
-    const cached = await AsyncStorage.getItem(COUNTRY_CACHE_KEY);
-    if (cached) {
-      return JSON.parse(cached) as UserCountry;
-    }
-
     // ipapi.co — free tier, no API key needed, HTTPS, returns JSON
     const res = await fetch('https://ipapi.co/json/', {
       headers: { Accept: 'application/json' },
@@ -40,7 +35,7 @@ export async function detectCountryByIP(): Promise<UserCountry | null> {
     const code: string = json.country_code ?? '';
     const name: string = json.country_name ?? json.country ?? '';
 
-    if (!code || code.length !== 2) return null;
+    if (!code || code.length !== 2) throw new Error('Invalid country code');
 
     const flag = countryCodeToFlag(code);
     const result: UserCountry = {
@@ -53,7 +48,12 @@ export async function detectCountryByIP(): Promise<UserCountry | null> {
     await AsyncStorage.setItem(COUNTRY_CACHE_KEY, JSON.stringify(result));
     return result;
   } catch (err) {
-    console.warn('[useUserCountry] IP detection failed:', err);
+    console.warn('[useUserCountry] IP detection failed, falling back to cache:', err);
+    // Fall back to last known good value so the app still works offline
+    try {
+      const cached = await AsyncStorage.getItem(COUNTRY_CACHE_KEY);
+      if (cached) return JSON.parse(cached) as UserCountry;
+    } catch { /* ignore */ }
     return null;
   }
 }

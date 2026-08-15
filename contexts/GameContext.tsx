@@ -137,14 +137,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
       const badges = await getUserBadges(user.id);
       setUserBadges(badges);
 
-      // Detect country via IP if not already saved on the profile
-      if (!stats?.country) {
-        detectCountryByIP().then((detected) => {
-          if (detected) {
-            saveUserCountry(user.id, detected.code).catch(() => {});
-          }
-        }).catch(() => {});
-      }
+      // Detect country via IP on every app open and update the profile if it changed.
+      // detectCountryByIP() always fetches fresh (falls back to cached value on failure),
+      // so the "My Country" category and leaderboard always reflect current location.
+      detectCountryByIP().then((detected) => {
+        if (detected && detected.code !== stats?.country) {
+          saveUserCountry(user.id, detected.code).catch(() => {});
+        }
+      }).catch(() => {});
     } else {
       const raw = await AsyncStorage.getItem(GUEST_STORAGE_KEY);
       if (raw) {

@@ -32,7 +32,7 @@ import { BADGES } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constants/theme';
 
 const PRIVACY_POLICY_URL = 'https://react-9bj8xm.onspace.build';
-const TERMS_URL = 'https://example.com/terms';
+const TERMS_URL = 'https://react-9bj8ye.onspace.build';
 
 type EditField = 'username' | 'email' | 'password' | null;
 

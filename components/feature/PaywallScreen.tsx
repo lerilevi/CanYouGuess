@@ -338,8 +338,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.primary + '44',
-    alignSelf: 'stretch',
-    marginHorizontal: Spacing.lg,
   },
   oneTimeTextBlock: {
     flex: 1,

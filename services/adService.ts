@@ -129,6 +129,29 @@ export function showInterstitial(): Promise<boolean> {
   });
 }
 
+// ─── UMP Privacy Options Form ───────────────────────────────────────────────────
+
+/**
+ * Shows the Google UMP privacy options form so the user can review or change
+ * their ad consent choices at any time.
+ * Only available after the SDK has been initialised and UMP has collected
+ * consent — the form may not be available in all regions.
+ */
+export async function showPrivacyOptionsForm(): Promise<{ error?: string }> {
+  const mod = getNativeAds();
+  if (!mod) {
+    return { error: 'Ad preferences are not available in this environment.' };
+  }
+  try {
+    await mod.AdsConsent.showPrivacyOptionsForm();
+    return {};
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[adService] showPrivacyOptionsForm error:', message);
+    return { error: message ?? 'Could not open privacy options.' };
+  }
+}
+
 // ─── Rewarded ─────────────────────────────────────────────────────────────────
 
 export function showRewardedAd(): Promise<boolean> {

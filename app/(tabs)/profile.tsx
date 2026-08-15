@@ -28,6 +28,7 @@ import {
   UserStats,
 } from '@/services/profileService';
 import { logoutPurchasesUser, restorePurchases } from '@/services/purchasesService';
+import { showPrivacyOptionsForm } from '@/services/adService';
 import { BADGES } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constants/theme';
 
@@ -48,6 +49,7 @@ export default function ProfileTab() {
   const [showPaywall, setShowPaywall] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [privacyOptionsLoading, setPrivacyOptionsLoading] = useState(false);
 
   // Edit profile state
   const [editField, setEditField] = useState<EditField>(null);
@@ -353,6 +355,29 @@ export default function ProfileTab() {
               <MaterialIcons name="privacy-tip" size={20} color={Colors.textSecondary} />
               <Text style={styles.settingsLabel}>Privacy Policy</Text>
               <MaterialIcons name="open-in-new" size={16} color={Colors.textMuted} />
+            </Pressable>
+
+            <View style={styles.settingsDivider} />
+
+            <Pressable
+              onPress={async () => {
+                setPrivacyOptionsLoading(true);
+                const result = await showPrivacyOptionsForm();
+                setPrivacyOptionsLoading(false);
+                if (result.error) {
+                  showAlert('Not Available', 'Ad preference settings are not available in your region or have not been set up yet.');
+                }
+              }}
+              disabled={privacyOptionsLoading}
+              style={({ pressed }) => [styles.settingsRow, { opacity: pressed || privacyOptionsLoading ? 0.7 : 1 }]}
+            >
+              <MaterialIcons name="tune" size={20} color={Colors.textSecondary} />
+              <Text style={styles.settingsLabel}>Ad Preferences</Text>
+              {privacyOptionsLoading ? (
+                <ActivityIndicator size="small" color={Colors.textSecondary} />
+              ) : (
+                <MaterialIcons name="chevron-right" size={20} color={Colors.textMuted} />
+              )}
             </Pressable>
 
             <View style={styles.settingsDivider} />

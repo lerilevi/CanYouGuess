@@ -12,22 +12,8 @@
  * Replace the value below with your real AdMob App ID before building.
  */
 
-// ⚠️  Replace with your real AdMob App ID (not a secret — visible in Info.plist).
-// Format: ca-app-pub-XXXXXXXXXXXXXXXXX~XXXXXXXXXX
-const admobAppId =
-  process.env.EXPO_PUBLIC_ADMOB_APP_ID &&
-  !process.env.EXPO_PUBLIC_ADMOB_APP_ID.includes('placeholder')
-    ? process.env.EXPO_PUBLIC_ADMOB_APP_ID
-    : (() => {
-        console.warn(
-          '[app.config.js] WARNING: EXPO_PUBLIC_ADMOB_APP_ID is not set or is a placeholder. ' +
-          'The Google Mobile Ads SDK will crash on launch in production builds. ' +
-          'Set the real AdMob App ID before submitting to TestFlight/Play Store.'
-        );
-        // Return Google\'s official test App ID so development/test builds
-        // don\'t crash. MUST be replaced with the real ID for production.
-        return 'ca-app-pub-3940256099942544~1458002511'; // Google test App ID (iOS)
-      })();
+// AdMob App ID — hard-coded (not a secret; ships in every binary's Info.plist).
+const admobAppId = 'ca-app-pub-1234939432505573~9931354547';
 
 module.exports = {
   expo: {

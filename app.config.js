@@ -13,7 +13,8 @@
  */
 
 // AdMob App ID — hard-coded (not a secret; ships in every binary's Info.plist).
-const admobAppId = 'ca-app-pub-1234939432505573~9931354547';
+// Commented out for isolation test build (Option A).
+// const admobAppId = 'ca-app-pub-1234939432505573~9931354547';
 
 module.exports = {
   expo: {
@@ -44,17 +45,19 @@ module.exports = {
     },
     plugins: [
       'expo-router',
-      [
-        'react-native-google-mobile-ads',
-        {
-          androidAppId: admobAppId,
-          iosAppId: admobAppId,
-          userTrackingUsageDescription:
-            'This identifier will be used to deliver personalized ads to you.',
-          skAdNetworkItems: [],
-        },
-      ],
-      'expo-tracking-transparency',
+      // react-native-google-mobile-ads and expo-tracking-transparency
+      // disabled for Option A isolation test build.
+      // [
+      //   'react-native-google-mobile-ads',
+      //   {
+      //     androidAppId: admobAppId,
+      //     iosAppId: admobAppId,
+      //     userTrackingUsageDescription:
+      //       'This identifier will be used to deliver personalized ads to you.',
+      //     skAdNetworkItems: [],
+      //   },
+      // ],
+      // 'expo-tracking-transparency',
       [
         'expo-splash-screen',
         {

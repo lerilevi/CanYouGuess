@@ -32,7 +32,7 @@ export default function RootLayout() {
     // queue if called synchronously during the first JS render cycle.
     const timer = setTimeout(() => {
       initializePurchases();
-      initializeAds();
+      // initializeAds(); // Disabled for Option A isolation test build
     }, 0);
     return () => clearTimeout(timer);
   }, []);

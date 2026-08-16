@@ -2,34 +2,50 @@
  * purchasesService.ts
  *
  * Real RevenueCat integration via react-native-purchases.
- * API key is read from EXPO_PUBLIC_REVENUECAT_PUBLIC_SDK_KEY.
+ *
+ * IMPORTANT: All imports from 'react-native-purchases' are done lazily via
+ * require() inside each function — never at module parse time. A static
+ * top-level import of a native module (like RevenueCat) causes the iOS SDK
+ * to be loaded during JS bundle evaluation on a background queue, which can
+ * throw an NSException and crash the app before any UI renders.
+ *
  * The web platform uses purchasesService.web.ts (Metro platform extension).
  */
 
-import Purchases, {
-  LOG_LEVEL,
-  type PurchasesPackage,
-  type CustomerInfo,
-} from 'react-native-purchases';
 import { APP_CONFIG } from '@/constants/config';
+
+// ─── Lazy native module access ────────────────────────────────────────────────
+
+type PurchasesModule = typeof import('react-native-purchases');
+
+function getNativePurchases(): PurchasesModule | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('react-native-purchases') as PurchasesModule;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Initialisation ──────────────────────────────────────────────────────────
 
 let _initialized = false;
 
-export const initializePurchases = async (userId?: string): Promise<void> => {
+export const initializePurchases = async (): Promise<void> => {
   if (_initialized) return;
+  const mod = getNativePurchases();
+  if (!mod) {
+    console.warn('[Purchases] react-native-purchases native module not available.');
+    return;
+  }
   try {
     const apiKey = APP_CONFIG.revenueCatKey;
     if (!apiKey) {
       console.warn('[Purchases] EXPO_PUBLIC_REVENUECAT_PUBLIC_SDK_KEY is not set.');
       return;
     }
-    Purchases.setLogLevel(LOG_LEVEL.ERROR);
-    await Purchases.configure({ apiKey });
-    if (userId) {
-      await Purchases.logIn(userId);
-    }
+    mod.default.setLogLevel(mod.LOG_LEVEL.ERROR);
+    await mod.default.configure({ apiKey });
     _initialized = true;
   } catch (err) {
     console.error('[Purchases] initializePurchases failed:', err);
@@ -39,18 +55,20 @@ export const initializePurchases = async (userId?: string): Promise<void> => {
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export const loginPurchasesUser = async (userId: string): Promise<void> => {
+  const mod = getNativePurchases();
   try {
-    if (!_initialized) return;
-    await Purchases.logIn(userId);
+    if (!_initialized || !mod) return;
+    await mod.default.logIn(userId);
   } catch (err) {
     console.error('[Purchases] loginPurchasesUser failed:', err);
   }
 };
 
 export const logoutPurchasesUser = async (): Promise<void> => {
+  const mod = getNativePurchases();
   try {
-    if (!_initialized) return;
-    await Purchases.logOut();
+    if (!_initialized || !mod) return;
+    await mod.default.logOut();
   } catch (err) {
     console.error('[Purchases] logoutPurchasesUser failed:', err);
   }
@@ -58,10 +76,11 @@ export const logoutPurchasesUser = async (): Promise<void> => {
 
 // ─── Customer info ───────────────────────────────────────────────────────────
 
-export const getCustomerInfo = async (): Promise<CustomerInfo | null> => {
+export const getCustomerInfo = async (): Promise<import('react-native-purchases').CustomerInfo | null> => {
+  const mod = getNativePurchases();
   try {
-    if (!_initialized) return null;
-    return await Purchases.getCustomerInfo();
+    if (!_initialized || !mod) return null;
+    return await mod.default.getCustomerInfo();
   } catch (err) {
     console.error('[Purchases] getCustomerInfo failed:', err);
     return null;
@@ -82,11 +101,12 @@ export const checkIsSubscribed = async (): Promise<boolean> => {
 // ─── Offerings ───────────────────────────────────────────────────────────────
 
 export const getOfferings = async (): Promise<{
-  current: { availablePackages: PurchasesPackage[] };
+  current: { availablePackages: import('react-native-purchases').PurchasesPackage[] };
 } | null> => {
+  const mod = getNativePurchases();
   try {
-    if (!_initialized) return null;
-    const offerings = await Purchases.getOfferings();
+    if (!_initialized || !mod) return null;
+    const offerings = await mod.default.getOfferings();
     if (!offerings.current) return null;
     return { current: { availablePackages: offerings.current.availablePackages } };
   } catch (err) {
@@ -100,10 +120,11 @@ export const getOfferings = async (): Promise<{
 export const purchasePackage = async (
   packageToPurchase: unknown
 ): Promise<{ success: boolean; error?: string }> => {
+  const mod = getNativePurchases();
   try {
-    if (!_initialized) return { success: false, error: 'Purchases not initialized' };
-    const { customerInfo } = await Purchases.purchasePackage(
-      packageToPurchase as PurchasesPackage
+    if (!_initialized || !mod) return { success: false, error: 'Purchases not initialized' };
+    const { customerInfo } = await mod.default.purchasePackage(
+      packageToPurchase as import('react-native-purchases').PurchasesPackage
     );
     const active = customerInfo.entitlements.active[APP_CONFIG.premiumEntitlementId];
     if (active) {
@@ -124,9 +145,10 @@ export const restorePurchases = async (): Promise<{
   isSubscribed: boolean;
   error?: string;
 }> => {
+  const mod = getNativePurchases();
   try {
-    if (!_initialized) return { success: false, isSubscribed: false, error: 'Purchases not initialized' };
-    const customerInfo = await Purchases.restorePurchases();
+    if (!_initialized || !mod) return { success: false, isSubscribed: false, error: 'Purchases not initialized' };
+    const customerInfo = await mod.default.restorePurchases();
     const active = customerInfo.entitlements.active[APP_CONFIG.premiumEntitlementId];
     return { success: true, isSubscribed: !!active };
   } catch (err: unknown) {

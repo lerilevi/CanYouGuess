@@ -24,11 +24,13 @@ module.exports = {
     icon: './assets/images/logo.png',
     scheme: 'onspaceapp',
     userInterfaceStyle: 'automatic',
-    newArchEnabled: true,
+    newArchEnabled: false,
     ios: {
       supportsTablet: true,
+      bundleIdentifier: 'com.canyouguess.app',
     },
     android: {
+      package: 'com.canyouguess.app',
       adaptiveIcon: {
         foregroundImage: './assets/images/logo.png',
         backgroundColor: '#ffffff',

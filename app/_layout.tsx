@@ -25,10 +25,16 @@ function PurchasesSync() {
 
 export default function RootLayout() {
   useEffect(() => {
-    // Initialize RevenueCat as early as possible (no userId yet; identity
-    // is set later by PurchasesSync once auth resolves).
-    initializePurchases();
-    initializeAds();
+    // Delay SDK initialization by one event-loop tick so the native app
+    // delegate finishes applicationDidFinishLaunching before any SDK tries
+    // to access native modules. Both react-native-purchases and
+    // react-native-google-mobile-ads can throw NSExceptions on a background
+    // queue if called synchronously during the first JS render cycle.
+    const timer = setTimeout(() => {
+      initializePurchases();
+      initializeAds();
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   return (

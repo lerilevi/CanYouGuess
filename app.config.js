@@ -28,10 +28,10 @@ module.exports = {
     newArchEnabled: false,
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.canyouguess.app',
+      bundleIdentifier: 'app.onspace.canyouguess',
     },
     android: {
-      package: 'com.canyouguess.app',
+      package: 'app.onspace.canyouguess',
       adaptiveIcon: {
         foregroundImage: './assets/images/logo.png',
         backgroundColor: '#ffffff',

@@ -13,11 +13,12 @@ function PurchasesSync() {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (user?.id) {
-      loginPurchasesUser(user.id);
-    } else {
-      logoutPurchasesUser();
-    }
+    // Disabled for Option B isolation test build
+    // if (user?.id) {
+    //   loginPurchasesUser(user.id);
+    // } else {
+    //   logoutPurchasesUser();
+    // }
   }, [user?.id]);
 
   return null;
@@ -31,7 +32,7 @@ export default function RootLayout() {
     // react-native-google-mobile-ads can throw NSExceptions on a background
     // queue if called synchronously during the first JS render cycle.
     const timer = setTimeout(() => {
-      initializePurchases();
+      // initializePurchases(); // Disabled for Option B isolation test build
       // initializeAds(); // Disabled for Option A isolation test build
     }, 0);
     return () => clearTimeout(timer);

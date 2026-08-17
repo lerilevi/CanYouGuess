@@ -21,7 +21,7 @@ import {
   UserBadge,
 } from '@/services/profileService';
 import { detectCountryByIP } from '@/hooks/useUserCountry';
-import { showInterstitial, showRewardedAd, preloadInterstitial } from '@/services/adService';
+import { showRewardedAd } from '@/services/adService';
 import { APP_CONFIG, AD_CONFIG, CATEGORIES } from '@/constants/config';
 
 export type GamePhase = 'idle' | 'loading' | 'question' | 'answering' | 'evaluating' | 'result' | 'error';
@@ -89,9 +89,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [consentGiven, setConsentGivenState] = useState<boolean | null>(null);
   const [questionTypePreference, setQuestionTypePreferenceState] = useState<QuestionTypePreference>('mix');
 
-  // Interstitial frequency cap: count result screens since last interstitial
-  const resultsSinceLastInterstitial = useRef(0);
-
   const setConsentGiven = useCallback(async (v: boolean) => {
     setConsentGivenState(v);
     await AsyncStorage.setItem(CONSENT_STORAGE_KEY, v ? 'true' : 'false');
@@ -157,10 +154,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Pre-load interstitial for free users
-    if (!isPaid) {
-      preloadInterstitial();
-    }
   }, [user, isPaid, loadBonusCount]);
 
   // ─── Play gate ──────────────────────────────────────────────────────────
@@ -344,20 +337,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
 
       setPhase('result');
-
-      // ── Interstitial: show to free users at natural break (after result) ──
-      // Only once every N results to avoid feeling spammy.
-      if (!isPaid) {
-        resultsSinceLastInterstitial.current += 1;
-        if (resultsSinceLastInterstitial.current >= AD_CONFIG.interstitialFrequency) {
-          resultsSinceLastInterstitial.current = 0;
-          // Fire-and-forget — doesn't block UI
-          showInterstitial().then(() => {
-            // Pre-load next one after it closes
-            setTimeout(preloadInterstitial, 3000);
-          });
-        }
-      }
     } catch (err) {
       console.error('Evaluate error:', err);
       setPhase('error');

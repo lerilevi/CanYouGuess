@@ -1,10 +1,5 @@
 export const AD_CONFIG = {
   /**
-   * How many result screens must pass before an interstitial is eligible.
-   * e.g. 3 = show at most once every 3 completed questions.
-   */
-  interstitialFrequency: 3,
-  /**
    * Max bonus questions a free user can earn via rewarded ads per day.
    */
   maxDailyBonusQuestions: 3,

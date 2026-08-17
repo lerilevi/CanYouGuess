@@ -32,14 +32,6 @@ function getRewardedUnitId(): string {
     : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID ?? testId);
 }
 
-function getInterstitialUnitId(): string {
-  const mod = getNativeAds();
-  const testId = mod?.TestIds?.INTERSTITIAL ?? 'ca-app-pub-3940256099942544/4411468910';
-  return __DEV__
-    ? testId
-    : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID ?? testId);
-}
-
 // ─── ATT permission (iOS 14+) ─────────────────────────────────────────────────
 
 async function requestTrackingPermission(): Promise<void> {
@@ -72,61 +64,9 @@ export async function initializeAds(): Promise<void> {
   try {
     await mod.default().initialize();
     adsInitialized = true;
-    preloadInterstitial();
   } catch (err) {
     console.warn('[adService] Failed to initialize Mobile Ads SDK:', err);
   }
-}
-
-// ─── Interstitial ─────────────────────────────────────────────────────────────
-
-let interstitialAd: unknown = null;
-let interstitialLoaded = false;
-
-export function preloadInterstitial(): void {
-  const mod = getNativeAds();
-  if (!mod) return;
-
-  try {
-    const ad = mod.InterstitialAd.createForAdRequest(getInterstitialUnitId(), {
-      requestNonPersonalizedAdsOnly: false,
-    });
-
-    ad.addAdEventListener(mod.AdEventType.LOADED, () => {
-      interstitialLoaded = true;
-    });
-    ad.addAdEventListener(mod.AdEventType.ERROR, () => {
-      interstitialLoaded = false;
-    });
-    ad.addAdEventListener(mod.AdEventType.CLOSED, () => {
-      interstitialLoaded = false;
-      setTimeout(preloadInterstitial, 3000);
-    });
-
-    ad.load();
-    interstitialAd = ad;
-  } catch (err) {
-    console.warn('[adService] preloadInterstitial error:', err);
-  }
-}
-
-export function showInterstitial(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const mod = getNativeAds();
-    if (!mod || !interstitialAd || !interstitialLoaded) {
-      resolve(false);
-      return;
-    }
-    try {
-      const ad = interstitialAd as InstanceType<typeof mod.InterstitialAd>;
-      ad.addAdEventListener(mod.AdEventType.CLOSED, () => resolve(true));
-      ad.addAdEventListener(mod.AdEventType.ERROR, () => resolve(false));
-      ad.show();
-    } catch (err) {
-      console.warn('[adService] showInterstitial error:', err);
-      resolve(false);
-    }
-  });
 }
 
 // ─── UMP Privacy Options Form ───────────────────────────────────────────────────

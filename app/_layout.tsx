@@ -13,30 +13,24 @@ function PurchasesSync() {
   const { user } = useAuth();
 
   useEffect(() => {
-    // Disabled for Option B isolation test build
-    // if (user?.id) {
-    //   loginPurchasesUser(user.id);
-    // } else {
-    //   logoutPurchasesUser();
-    // }
-  }, [user?.id]);
+  if (user?.id) {
+    loginPurchasesUser(user.id);
+  } else {
+    logoutPurchasesUser();
+  }
+}, [user?.id]);
 
   return null;
 }
 
 export default function RootLayout() {
   useEffect(() => {
-    // Delay SDK initialization by one event-loop tick so the native app
-    // delegate finishes applicationDidFinishLaunching before any SDK tries
-    // to access native modules. Both react-native-purchases and
-    // react-native-google-mobile-ads can throw NSExceptions on a background
-    // queue if called synchronously during the first JS render cycle.
-    const timer = setTimeout(() => {
-      // initializePurchases(); // Disabled for Option B isolation test build
-      // initializeAds(); // Disabled for Option A isolation test build
-    }, 0);
-    return () => clearTimeout(timer);
-  }, []);
+  const timer = setTimeout(() => {
+    initializePurchases();
+    initializeAds();
+  }, 0);
+  return () => clearTimeout(timer);
+}, []);
 
   return (
     <AlertProvider>

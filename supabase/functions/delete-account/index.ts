@@ -1,82 +1,107 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// Edge Function: delete-account
+//
+// Rewritten for the self-owned Supabase project. On OnSpace Cloud,
+// `auth.admin.deleteUser` was blocked by an "internal network only"
+// restriction, so the old version deleted the user's rows table-by-table and
+// left the auth account orphaned — the user could still log in and would be
+// handed a blank profile.
+//
+// Here we delete the auth user itself. Every table references
+// `auth.users(id) ON DELETE CASCADE` (see migration 0001), so one delete
+// removes user_profiles, user_stats, score_events, user_badges and
+// category_scores atomically, with no ordering to keep in sync as the schema
+// grows.
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0';
 import { corsHeaders } from '../_shared/cors.ts';
 
+interface DeleteRequest {
+  /** Must equal "DELETE" — guards against an accidental invoke. */
+  confirm?: string;
+}
+
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+  if (req.method !== 'POST') {
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+  // Fail loudly rather than falling back to '' and producing a confusing 401.
+  if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+    console.error('[delete-account] Missing required environment variables.');
+    return json({ error: 'Server misconfigured' }, 500);
+  }
 
   try {
-    // Identify the calling user from their JWT
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (!authHeader?.startsWith('Bearer ')) {
+      return json({ error: 'Missing authorization header' }, 401);
     }
+    const token = authHeader.slice('Bearer '.length);
 
-    const token = authHeader.replace('Bearer ', '');
-
-    // Use a user-scoped client just to verify the token / get the user id
-    const supabaseUser = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: `Bearer ${token}` } } }
-    );
+    // Resolve the caller from their own JWT. Never trust a user id from the
+    // request body — that would let any signed-in user delete anyone.
+    const supabaseUser = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { data: { user }, error: userError } = await supabaseUser.auth.getUser(token);
     if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid or expired session' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return json({ error: 'Invalid or expired session' }, 401);
     }
 
-    // Use the service-role client to delete all user data directly from the DB.
-    // Deletion order respects FK constraints:
-    //   category_scores, leaderboard_scores, user_badges, user_stats → user_profiles
-    // Deleting user_profiles last cleans up the root row; all child rows are
-    // removed first to avoid FK violations in case cascades aren't in effect.
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    const tables = ['category_scores', 'leaderboard_scores', 'user_badges', 'user_stats', 'user_profiles'];
-    for (const table of tables) {
-      const { error: delErr } = await supabaseAdmin
-        .from(table)
-        .delete()
-        .eq(table === 'user_profiles' ? 'id' : 'user_id', user.id);
-
-      if (delErr) {
-        console.error(`[delete-account] Failed to delete from ${table}:`, delErr.message);
-        return new Response(
-          JSON.stringify({ error: `Failed to delete from ${table}: ${delErr.message}` }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+    let body: DeleteRequest = {};
+    try {
+      body = (await req.json()) as DeleteRequest;
+    } catch {
+      // Empty body is fine; the confirm check below still applies.
+    }
+    if (body.confirm !== 'DELETE') {
+      return json({ error: 'Confirmation required' }, 400);
     }
 
-    // Attempt to delete the auth user. This may fail on some hosting environments
-    // (ipNotInner restriction) — treat that as a soft failure: data is already gone.
-    const { error: authDelErr } = await supabaseAdmin.auth.admin.deleteUser(user.id);
-    if (authDelErr) {
-      console.warn('[delete-account] auth.admin.deleteUser not available; data already purged:', authDelErr.message);
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // Single delete; ON DELETE CASCADE fans out to every dependent table.
+    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(user.id);
+
+    if (deleteError) {
+      console.error(`[delete-account] Failed to delete auth user ${user.id}:`, deleteError.message);
+      return json({ error: 'Account deletion failed. Please contact support.' }, 500);
     }
 
-    console.log(`[delete-account] Deleted all data for user ${user.id}.`);
-    return new Response(
-      JSON.stringify({ success: true }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    // Verify rather than assume — if a future table is added without a cascade
+    // this surfaces as a loud log line instead of silently orphaned data.
+    const { data: leftover } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (leftover) {
+      console.error(`[delete-account] user_profiles row survived deletion of ${user.id} — check FK cascades.`);
+    }
+
+    console.log(`[delete-account] Deleted auth user ${user.id} and all cascaded data.`);
+    return json({ success: true }, 200);
   } catch (err) {
     console.error('[delete-account] Unexpected error:', err);
-    return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return json({ error: 'Internal server error' }, 500);
   }
 });

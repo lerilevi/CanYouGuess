@@ -1,3 +1,8 @@
+// Must be first: installs the global JS error handler before any other module
+// can throw, so a fatal error is persisted and readable on the next launch.
+import { installErrorReporter } from '@/services/errorReporter';
+installErrorReporter();
+
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -7,6 +12,7 @@ import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { StatusBar } from 'expo-status-bar';
 import { initializePurchases, loginPurchasesUser, logoutPurchasesUser } from '@/services/purchasesService';
 import { initializeAds } from '@/services/adService';
+import { PreviousCrashNotice } from '@/components/feature/PreviousCrashNotice';
 
 /** Syncs RevenueCat identity whenever the auth user changes. */
 function PurchasesSync() {
@@ -34,6 +40,7 @@ export default function RootLayout() {
 
   return (
     <AlertProvider>
+      <PreviousCrashNotice />
       <SafeAreaProvider>
         <AuthProvider>
           <PurchasesSync />

@@ -8,3 +8,4 @@ export { BadgeCard } from './ui/BadgeCard';
 export { StreakBadge } from './ui/StreakBadge';
 export { ConsentModal } from './feature/ConsentModal';
 export { PaywallScreen } from './feature/PaywallScreen';
+export { PreviousCrashNotice } from './feature/PreviousCrashNotice';

@@ -19,6 +19,11 @@ create table public.user_profiles (
   -- ISO 3166-1 alpha-2, refreshed from IP on each launch. Nullable: detection
   -- can fail offline and the app must still work.
   country     text,
+  -- IANA timezone reported by the device (Intl.DateTimeFormat().resolvedOptions().timeZone).
+  -- Drives each user's own daily/weekly reset at their local midnight. Validated
+  -- against pg_timezone_names by set_my_timezone(); 'UTC' is the safe fallback
+  -- for a device that cannot report one.
+  timezone    text not null default 'UTC',
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   constraint user_profiles_username_length check (char_length(username::text) between 2 and 24),
@@ -38,15 +43,28 @@ create table public.score_events (
   category      text not null,
   question_type text not null default 'trivia',
   score         integer not null,
+  -- The user's own calendar date at the moment of submission, supplied by the
+  -- client. Stored per-event rather than derived at query time so that history
+  -- is immutable: changing timezone (or travelling) must not silently rewrite
+  -- which day past answers counted toward.
+  local_date    date not null,
+  -- Kept for auditing/debugging only; local_date is the field windows key off.
+  tz_offset_minutes integer,
   created_at    timestamptz not null default now(),
   constraint score_events_score_range check (score between 0 and 100),
-  constraint score_events_question_type check (question_type in ('trivia', 'estimation'))
+  constraint score_events_question_type check (question_type in ('trivia', 'estimation')),
+  -- Real UTC offsets span -12:00..+14:00.
+  constraint score_events_tz_offset_range check (
+    tz_offset_minutes is null or tz_offset_minutes between -720 and 840
+  )
 );
 
 -- Covers "my events in a window" (daily gate, personal history).
 create index score_events_user_created_idx on public.score_events (user_id, created_at desc);
 -- Covers the global daily/weekly leaderboard aggregations.
 create index score_events_created_idx on public.score_events (created_at desc);
+-- Serves the per-user local-day and rolling-local-week aggregations.
+create index score_events_user_local_date_idx on public.score_events (user_id, local_date desc);
 
 comment on table public.score_events is
   'Append-only. Never updated or deleted except by user cascade. All leaderboard windows derive from this.';
@@ -61,6 +79,9 @@ create table public.user_stats (
   current_streak  integer not null default 0,
   longest_streak  integer not null default 0,
   last_played_at  timestamptz,
+  -- The user's local date of their last answer. Streak comparisons use this,
+  -- so a streak breaks at the player's own midnight rather than a server one.
+  last_played_local_date date,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );

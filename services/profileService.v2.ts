@@ -14,12 +14,16 @@
  *    daily_score / weekly_score values.
  *  - questions_today is derived from score_events instead of being a counter
  *    the client resets, so it cannot drift.
+ *  - Day boundaries are the user's own local midnight. Every submission
+ *    carries the device's local date, so the daily allowance and the daily
+ *    leaderboard reset at the player's midnight rather than a server one.
  *  - Username updates go through update_my_username(), which reports a real
  *    uniqueness conflict instead of silently succeeding.
  *  - deleteUserAccount sends the confirm token the new Edge Function requires.
  */
 
 import { getSupabaseClient } from '@/template';
+import { getLocalDate, getTimezoneOffsetMinutes, getTimezoneName } from '@/services/localTime.v2';
 
 export interface SubmitScoreResult {
   total_score: number;
@@ -27,7 +31,26 @@ export interface SubmitScoreResult {
   current_streak: number;
   longest_streak: number;
   questions_today: number;
+  /** The local date the server recorded this answer against (YYYY-MM-DD). */
+  local_date: string;
 }
+
+/**
+ * Reports the device's IANA timezone so the server can evaluate this user's
+ * day boundary. Call once per launch, alongside country detection. Cheap and
+ * idempotent — the RPC no-ops when the value is unchanged.
+ */
+export const reportTimezone = async (): Promise<void> => {
+  const tz = getTimezoneName();
+  if (!tz) return;
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.rpc('set_my_timezone', { p_timezone: tz });
+  if (error) {
+    // Non-fatal: the server falls back to the last known zone, or UTC.
+    console.warn('[profile] set_my_timezone failed:', error.message);
+  }
+};
 
 /**
  * Records one answer. Replaces updateUserStats + updateCategoryScore + the
@@ -45,6 +68,10 @@ export const submitScore = async (
     p_category: category,
     p_score: score,
     p_question_type: questionType,
+    // The device is the authority on its own calendar day; the server
+    // validates the value is within ±1 day of its own before accepting it.
+    p_local_date: getLocalDate(),
+    p_tz_offset_minutes: getTimezoneOffsetMinutes(),
   });
 
   if (error) {
@@ -55,7 +82,7 @@ export const submitScore = async (
   return (data as SubmitScoreResult[] | null)?.[0] ?? null;
 };
 
-/** Questions answered since 00:00 UTC today. Drives the free-tier daily gate. */
+/** Questions answered so far in the user's own local day. Drives the free-tier gate. */
 export const getDailyUsage = async (): Promise<number> => {
   const supabase = getSupabaseClient();
 
@@ -66,7 +93,8 @@ export const getDailyUsage = async (): Promise<number> => {
     return 0;
   }
 
-  return (data as { questions_today: number }[] | null)?.[0]?.questions_today ?? 0;
+  return (data as { questions_today: number; local_date: string; timezone: string }[] | null)
+    ?.[0]?.questions_today ?? 0;
 };
 
 /** Idempotent. Returns true only when this call is what awarded the badge. */

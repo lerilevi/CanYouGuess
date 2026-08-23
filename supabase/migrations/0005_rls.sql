@@ -49,7 +49,9 @@ create policy user_profiles_update_own on public.user_profiles
 -- No INSERT policy: rows are created solely by the handle_new_user() trigger.
 -- No DELETE policy: removal happens via auth user cascade (see delete-account).
 
-grant select (id, username, country, created_at, updated_at) on public.user_profiles to authenticated;
+grant select (id, username, country, timezone, created_at, updated_at) on public.user_profiles to authenticated;
+-- timezone is written via set_my_timezone(), which validates against
+-- pg_timezone_names; no direct update grant on it.
 grant update (username, country) on public.user_profiles to authenticated;
 
 -- ─── user_stats ──────────────────────────────────────────────────────────────
@@ -74,6 +76,10 @@ create policy score_events_insert_own on public.score_events
   with check (
     user_id = (select auth.uid())
     and score between 0 and 100
+    -- No real UTC offset moves a device's date more than a day either side of
+    -- the server's, so this bounds a spoofed local_date even if a client calls
+    -- the table directly instead of going through submit_score().
+    and local_date between (current_date - 1) and (current_date + 1)
     -- Rate limit: caps a scripted client at 200 events/day, comfortably above
     -- the 18/day the game allows but low enough to stop leaderboard stuffing.
     and (
@@ -105,12 +111,14 @@ create policy category_scores_select_own on public.category_scores
 grant select on public.category_scores to authenticated;
 
 -- ─── Function execution ──────────────────────────────────────────────────────
-grant execute on function public.get_leaderboard(text, text, integer, integer) to authenticated;
-grant execute on function public.get_user_rank(uuid, text, text)               to authenticated;
-grant execute on function public.get_my_daily_usage()                          to authenticated;
-grant execute on function public.submit_score(text, integer, text)             to authenticated;
-grant execute on function public.award_badge(text)                             to authenticated;
-grant execute on function public.update_my_username(text)                      to authenticated;
-grant execute on function public.leaderboard_window_start(text)                to authenticated;
+grant execute on function public.get_leaderboard(text, text, integer, integer)       to authenticated;
+grant execute on function public.get_user_rank(uuid, text, text)                     to authenticated;
+grant execute on function public.get_my_daily_usage()                                to authenticated;
+grant execute on function public.submit_score(text, integer, text, date, integer)    to authenticated;
+grant execute on function public.award_badge(text)                                   to authenticated;
+grant execute on function public.update_my_username(text)                            to authenticated;
+grant execute on function public.set_my_timezone(text)                               to authenticated;
+grant execute on function public.my_local_date()                                     to authenticated;
+grant execute on function public.user_local_date(text)                               to authenticated;
 
 -- `anon` is granted nothing. Signup/login go through GoTrue, not PostgREST.

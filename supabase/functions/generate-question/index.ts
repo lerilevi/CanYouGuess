@@ -1,5 +1,5 @@
 // Edge Function: generate-question
-// Generates trivia/estimation questions and evaluates answers using OnSpace AI
+// Generates trivia/estimation questions and evaluates answers using Google Gemini.
 
 import { corsHeaders } from '../_shared/cors.ts';
 
@@ -71,16 +71,43 @@ User: "${userAnswer}"
 Allow spelling variants/abbreviations. JSON only:
 {"isCorrect":true/false,"correctAnswer":"<proper answer>","explanation":"<1-2 sentences>","score":<100 or 0>,"verdict":"<Correct!|Not Quite!>"}`;
 
+// ─── Google Gemini (direct) ──────────────────────────────────────────────────
+// Previously this called OnSpace's OpenAI-compatible gateway
+// (ONSPACE_AI_BASE_URL + /chat/completions) with model
+// 'google/gemini-3-flash-preview'. That gateway proxied to Google, so this is
+// the same underlying model reached directly — the 'google/' provider prefix
+// is a gateway routing convention and is not part of the Gemini model id.
+//
+// Required secret: GEMINI_API_KEY (Google AI Studio).
+// Set with:  supabase secrets set GEMINI_API_KEY=...
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+// Overridable so the model can be moved without a code change.
+// 'gemini-3-flash-preview' keeps the exact model that was in use. It is a
+// *preview* id — if Google retires it, set GEMINI_MODEL to a GA Flash model
+// (e.g. gemini-3.7-flash) and redeploy.
+const DEFAULT_MODEL = 'gemini-3-flash-preview';
+
+// Gemini 3 models reason before answering. Left unset the model uses its own
+// default, matching the previous gateway behaviour. If question latency hurts
+// the real-time feel, set GEMINI_THINKING_LEVEL=low to trade a little quality
+// for speed — that is the single biggest latency lever here.
+const THINKING_LEVEL = Deno.env.get('GEMINI_THINKING_LEVEL');
+
+// The game blocks on this call, so a hung request must not hang the round.
+const REQUEST_TIMEOUT_MS = Number(Deno.env.get('GEMINI_TIMEOUT_MS') ?? '20000');
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const apiKey = Deno.env.get('ONSPACE_AI_API_KEY');
-    const baseUrl = Deno.env.get('ONSPACE_AI_BASE_URL');
+    const apiKey = Deno.env.get('GEMINI_API_KEY');
+    const model = Deno.env.get('GEMINI_MODEL') ?? DEFAULT_MODEL;
 
-    if (!apiKey || !baseUrl) {
+    if (!apiKey) {
+      console.error('[generate-question] GEMINI_API_KEY is not set.');
       return new Response(
         JSON.stringify({ error: 'AI service not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -91,32 +118,77 @@ Deno.serve(async (req) => {
     const { action, category, country, question, userAnswer, correctAnswer, questionTypePreference } = body;
 
     const callAI = async (userPrompt: string): Promise<string> => {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-3-flash-preview',
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 1.2,
-        }),
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+      let res: Response;
+      try {
+        res = await fetch(`${GEMINI_ENDPOINT}/${model}:generateContent`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            // Header auth, never ?key= — a key in a URL leaks into logs.
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+            generationConfig: {
+              temperature: 1.2,
+              // Every prompt here demands JSON only; asking Gemini to enforce
+              // it removes the markdown-fence failure mode parseJSON works
+              // around.
+              responseMimeType: 'application/json',
+              ...(THINKING_LEVEL ? { thinkingConfig: { thinkingLevel: THINKING_LEVEL } } : {}),
+            },
+          }),
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          throw new Error(`Gemini request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
 
       if (!res.ok) {
         const errText = await res.text();
-        throw new Error(`AI API error: ${res.status} ${errText}`);
+        throw new Error(`Gemini API error: ${res.status} ${errText}`);
       }
 
       const data = await res.json();
-      return data.choices?.[0]?.message?.content ?? '';
+
+      // A safety block returns 200 with no candidate, so this must be checked
+      // explicitly or it surfaces as a confusing JSON parse failure.
+      const blockReason = data.promptFeedback?.blockReason;
+      if (blockReason) {
+        throw new Error(`Gemini blocked the prompt: ${blockReason}`);
+      }
+
+      const candidate = data.candidates?.[0];
+      if (!candidate) {
+        throw new Error('Gemini returned no candidates');
+      }
+      if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+        throw new Error(`Gemini stopped early: ${candidate.finishReason}`);
+      }
+
+      const text = (candidate.content?.parts ?? [])
+        .map((part: { text?: string }) => part.text ?? '')
+        .join('');
+
+      if (!text.trim()) {
+        throw new Error('Gemini returned an empty response');
+      }
+
+      return text;
     };
 
     const parseJSON = (raw: string): Record<string, unknown> => {
+      // responseMimeType should make fences impossible, but stripping them is
+      // cheap insurance against a model or config change.
       const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       return JSON.parse(cleaned);
     };

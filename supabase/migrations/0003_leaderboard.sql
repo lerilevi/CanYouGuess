@@ -68,9 +68,12 @@ as $$
       end as sc
     from public.user_profiles p
     left join public.user_stats s on s.user_id = p.id
-    where p_country is null or p.country = p_country
+    where auth.uid() is not null
+      and p_window in ('daily', 'weekly', 'all_time')
+      and (p_country is null or p_country ~ '^[A-Z]{2}$')
+      and (p_country is null or p.country = p_country)
   )
-  select rank() over (order by sc desc, uname asc) as rank,
+  select rank() over (order by sc desc) as rank,
          uid, uname, ctry, sc
     from scored
    where sc > 0
@@ -93,7 +96,9 @@ security definer
 set search_path = public, pg_temp
 as $$
   with target as (
-    select coalesce(p_user_id, auth.uid()) as uid
+    select auth.uid() as uid
+     where auth.uid() is not null
+       and (p_user_id is null or p_user_id = auth.uid())
   ),
   scored as (
     select
@@ -114,10 +119,12 @@ as $$
       end as sc
     from public.user_profiles p
     left join public.user_stats s on s.user_id = p.id
-    where p_country is null or p.country = p_country
+    where p_window in ('daily', 'weekly', 'all_time')
+      and (p_country is null or p_country ~ '^[A-Z]{2}$')
+      and (p_country is null or p.country = p_country)
   ),
   ranked as (
-    select uid, sc, rank() over (order by sc desc, uname asc) as rnk
+    select uid, sc, rank() over (order by sc desc) as rnk
       from scored
      where sc > 0
   )

@@ -8,16 +8,15 @@
 -- Derive a unique username from email local-part, de-duplicating on collision.
 -- user_profiles.username is UNIQUE (citext), and email local-parts collide
 -- often (alice@a.com / alice@b.com), so a naive insert would fail signup.
-create or replace function public.generate_unique_username(p_seed text)
+create or replace function public.generate_unique_username(p_seed text, p_user_id uuid)
 returns citext
 language plpgsql
-stable
+volatile
 set search_path = public, pg_temp
 as $$
 declare
   v_base      text;
   v_candidate text;
-  v_suffix    integer := 0;
 begin
   v_base := regexp_replace(coalesce(nullif(trim(p_seed), ''), 'player'), '[^A-Za-z0-9_]', '', 'g');
   if char_length(v_base) < 2 then
@@ -25,17 +24,26 @@ begin
   end if;
   v_base := left(v_base, 20);
 
+  -- Serialize equal seeds. Without this lock, two simultaneous signups could
+  -- both observe the base as available and one auth transaction would fail on
+  -- the unique index.
+  perform pg_advisory_xact_lock(hashtextextended(lower(v_base), 0));
+
   v_candidate := v_base;
-  while exists (select 1 from public.user_profiles where username = v_candidate::citext) loop
-    v_suffix    := v_suffix + 1;
-    v_candidate := left(v_base, 20 - char_length(v_suffix::text)) || v_suffix::text;
-  end loop;
+  if exists (select 1 from public.user_profiles where username = v_candidate::citext) then
+    -- UUID-derived suffix is stable, non-enumerating and effectively unique;
+    -- 13 base chars + '_' + 10 hex chars stays inside the 24-char limit.
+    v_candidate := left(v_base, 13) || '_' || left(replace(p_user_id::text, '-', ''), 10);
+  end if;
 
   return v_candidate::citext;
 end;
 $$;
 
-create or replace function public.handle_new_user()
+-- Normalize the authoritative username into Auth metadata before the user row
+-- is stored. The AFTER trigger below then creates the public profile from that
+-- exact value, so a fresh signup cannot start with divergent names.
+create or replace function public.normalize_new_user_metadata()
 returns trigger
 language plpgsql
 security definer
@@ -49,8 +57,35 @@ begin
       new.raw_user_meta_data ->> 'username',
       new.raw_user_meta_data ->> 'full_name',
       split_part(coalesce(new.email, ''), '@', 1)
-    )
+    ),
+    new.id
   );
+
+  new.raw_user_meta_data := jsonb_set(
+    coalesce(new.raw_user_meta_data, '{}'::jsonb),
+    '{username}',
+    to_jsonb(v_username::text),
+    true
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_metadata_normalize on auth.users;
+create trigger on_auth_user_metadata_normalize
+  before insert on auth.users
+  for each row execute function public.normalize_new_user_metadata();
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_username citext;
+begin
+  v_username := (new.raw_user_meta_data ->> 'username')::citext;
 
   insert into public.user_profiles (id, username)
   values (new.id, v_username)
@@ -69,9 +104,9 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Keep user_profiles.username in step when the client updates auth metadata,
--- so the two can no longer drift (the bug fixed client-side in profileService
--- is now enforced by the database).
+-- Keep user_profiles.username in step if Auth metadata is changed. This is a
+-- BEFORE trigger so it can normalize the metadata itself and reject invalid or
+-- duplicate changes atomically instead of silently allowing drift.
 create or replace function public.sync_username_from_auth()
 returns trigger
 language plpgsql
@@ -79,23 +114,38 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
-  v_new_username text := new.raw_user_meta_data ->> 'username';
+  v_new_username text := trim(new.raw_user_meta_data ->> 'username');
 begin
   if v_new_username is null then
+    if old.raw_user_meta_data ->> 'username' is not null then
+      raise exception 'Username metadata cannot be removed' using errcode = '22023';
+    end if;
     return new;
   end if;
 
   if old.raw_user_meta_data ->> 'username' is distinct from v_new_username then
+    if char_length(v_new_username) not between 2 and 24 then
+      raise exception 'Username must be between 2 and 24 characters' using errcode = '22023';
+    end if;
+
+    if exists (
+      select 1 from public.user_profiles p2
+       where p2.username = v_new_username::citext and p2.id <> new.id
+    ) then
+      raise exception 'That username is already taken' using errcode = '23505';
+    end if;
+
+    new.raw_user_meta_data := jsonb_set(
+      coalesce(new.raw_user_meta_data, '{}'::jsonb),
+      '{username}',
+      to_jsonb(v_new_username),
+      true
+    );
+
     update public.user_profiles
        set username = v_new_username::citext
      where id = new.id
-       and username <> v_new_username::citext
-       -- Silently skip if the name is taken; the client-facing
-       -- update_my_username() RPC reports the conflict properly.
-       and not exists (
-         select 1 from public.user_profiles p2
-          where p2.username = v_new_username::citext and p2.id <> new.id
-       );
+       and username <> v_new_username::citext;
   end if;
 
   return new;
@@ -104,7 +154,7 @@ $$;
 
 drop trigger if exists on_auth_user_metadata_updated on auth.users;
 create trigger on_auth_user_metadata_updated
-  after update of raw_user_meta_data on auth.users
+  before update of raw_user_meta_data on auth.users
   for each row execute function public.sync_username_from_auth();
 
 -- Username change with a real uniqueness error the UI can show.
@@ -112,7 +162,7 @@ create or replace function public.update_my_username(p_username text)
 returns void
 language plpgsql
 volatile
-security invoker
+security definer
 set search_path = public, pg_temp
 as $$
 declare
@@ -122,7 +172,7 @@ begin
     raise exception 'update_my_username requires an authenticated user' using errcode = '42501';
   end if;
 
-  if char_length(trim(p_username)) not between 2 and 24 then
+  if p_username is null or char_length(trim(p_username)) not between 2 and 24 then
     raise exception 'Username must be between 2 and 24 characters' using errcode = '22023';
   end if;
 
@@ -133,8 +183,17 @@ begin
     raise exception 'That username is already taken' using errcode = '23505';
   end if;
 
-  update public.user_profiles
-     set username = trim(p_username)::citext
+  update auth.users
+     set raw_user_meta_data = jsonb_set(
+       coalesce(raw_user_meta_data, '{}'::jsonb),
+       '{username}',
+       to_jsonb(trim(p_username)),
+       true
+     )
    where id = v_uid;
+
+  if not found then
+    raise exception 'Authenticated user is missing' using errcode = '23503';
+  end if;
 end;
 $$;

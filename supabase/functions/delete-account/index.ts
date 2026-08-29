@@ -8,8 +8,8 @@
 //
 // Here we delete the auth user itself. Every table references
 // `auth.users(id) ON DELETE CASCADE` (see migration 0001), so one delete
-// removes user_profiles, user_stats, score_events, user_badges and
-// category_scores atomically, with no ordering to keep in sync as the schema
+// removes every application row atomically, including private question state
+// and request-limit events, with no ordering to keep in sync as the schema
 // grows.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0';
@@ -20,11 +20,45 @@ interface DeleteRequest {
   confirm?: string;
 }
 
+const MAX_REQUEST_BYTES = 1_024;
+
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+async function readRequest(req: Request): Promise<DeleteRequest> {
+  if (!req.body) return {};
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_REQUEST_BYTES) {
+        await reader.cancel();
+        throw new Error('BODY_TOO_LARGE');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  if (!bytes.length) return {};
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  return parsed as DeleteRequest;
 }
 
 Deno.serve(async (req: Request) => {
@@ -33,6 +67,16 @@ Deno.serve(async (req: Request) => {
   }
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
+  }
+
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return json({ error: 'Missing authorization header' }, 401);
+  }
+
+  const contentLength = Number(req.headers.get('content-length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
+    return json({ error: 'Request body too large' }, 413);
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -46,10 +90,6 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return json({ error: 'Missing authorization header' }, 401);
-    }
     const token = authHeader.slice('Bearer '.length);
 
     // Resolve the caller from their own JWT. Never trust a user id from the
@@ -64,11 +104,14 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Invalid or expired session' }, 401);
     }
 
-    let body: DeleteRequest = {};
+    let body: DeleteRequest;
     try {
-      body = (await req.json()) as DeleteRequest;
-    } catch {
-      // Empty body is fine; the confirm check below still applies.
+      body = await readRequest(req);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'BODY_TOO_LARGE') {
+        return json({ error: 'Request body too large' }, 413);
+      }
+      return json({ error: 'Invalid JSON body' }, 400);
     }
     if (body.confirm !== 'DELETE') {
       return json({ error: 'Confirmation required' }, 400);
@@ -88,14 +131,13 @@ Deno.serve(async (req: Request) => {
 
     // Verify rather than assume — if a future table is added without a cascade
     // this surfaces as a loud log line instead of silently orphaned data.
-    const { data: leftover } = await supabaseAdmin
-      .from('user_profiles')
-      .select('id')
-      .eq('id', user.id)
-      .maybeSingle();
+    const { data: leftover, error: verificationError } = await supabaseAdmin
+      .rpc('account_data_exists', { p_user_id: user.id });
 
-    if (leftover) {
-      console.error(`[delete-account] user_profiles row survived deletion of ${user.id} — check FK cascades.`);
+    if (verificationError) {
+      console.error(`[delete-account] Could not verify cascades for ${user.id}:`, verificationError.message);
+    } else if (leftover === true) {
+      console.error(`[delete-account] Application rows survived deletion of ${user.id} — check FK cascades.`);
     }
 
     console.log(`[delete-account] Deleted auth user ${user.id} and all cascaded data.`);

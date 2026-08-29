@@ -1,0 +1,7 @@
+project_id = "canyouguess"
+
+[functions.generate-question]
+verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = true

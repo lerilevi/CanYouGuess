@@ -27,6 +27,9 @@ create table public.user_profiles (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   constraint user_profiles_username_length check (char_length(username::text) between 2 and 24),
+  constraint user_profiles_username_format check (
+    username::text = trim(username::text) and username::text !~ '[[:cntrl:]]'
+  ),
   constraint user_profiles_country_format  check (country is null or country ~ '^[A-Z]{2}$')
 );
 
@@ -43,15 +46,18 @@ create table public.score_events (
   category      text not null,
   question_type text not null default 'trivia',
   score         integer not null,
-  -- The user's own calendar date at the moment of submission, supplied by the
-  -- client. Stored per-event rather than derived at query time so that history
-  -- is immutable: changing timezone (or travelling) must not silently rewrite
+  -- The user's own calendar date at finalization, derived server-side from the
+  -- validated timezone in user_profiles. Stored per-event rather than derived
+  -- at query time so changing timezone (or travelling) cannot silently rewrite
   -- which day past answers counted toward.
   local_date    date not null,
   -- Kept for auditing/debugging only; local_date is the field windows key off.
   tz_offset_minutes integer,
   created_at    timestamptz not null default now(),
   constraint score_events_score_range check (score between 0 and 100),
+  constraint score_events_category check (
+    category in ('my_country', 'world', 'science', 'history', 'food_drink', 'sports', 'art')
+  ),
   constraint score_events_question_type check (question_type in ('trivia', 'estimation')),
   -- Real UTC offsets span -12:00..+14:00.
   constraint score_events_tz_offset_range check (
@@ -93,7 +99,10 @@ create table public.user_badges (
   user_id   uuid not null references auth.users (id) on delete cascade,
   badge_id  text not null,
   earned_at timestamptz not null default now(),
-  primary key (user_id, badge_id)
+  primary key (user_id, badge_id),
+  constraint user_badges_badge_id check (
+    badge_id in ('first_guess', 'sniper', 'marathoner', 'category_master')
+  )
 );
 
 comment on table public.user_badges is
@@ -106,8 +115,85 @@ create table public.category_scores (
   highest_score      integer not null default 0,
   questions_answered integer not null default 0,
   updated_at         timestamptz not null default now(),
-  primary key (user_id, category)
+  primary key (user_id, category),
+  constraint category_scores_category check (
+    category in ('my_country', 'world', 'science', 'history', 'food_drink', 'sports', 'art')
+  )
 );
+
+-- ─── Server-authoritative question sessions ─────────────────────────────────
+-- The client never receives the stored correct answer and never inserts a
+-- score. The authenticated Edge Function creates a session after generation,
+-- evaluates against this row, then finalizes it exactly once through the
+-- privileged transaction in 0002.
+create table public.question_sessions (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null references auth.users (id) on delete cascade,
+  category          text not null,
+  question_type     text not null,
+  question          text not null,
+  correct_answer    text not null default '',
+  acceptable_answers text[] not null default '{}',
+  expires_at        timestamptz not null default (now() + interval '15 minutes'),
+  evaluation_token  uuid,
+  evaluation_started_at timestamptz,
+  answered_at       timestamptz,
+  score             integer,
+  deviation_percent numeric,
+  created_at        timestamptz not null default now(),
+  constraint question_sessions_category check (
+    category in ('my_country', 'world', 'science', 'history', 'food_drink', 'sports', 'art')
+  ),
+  constraint question_sessions_question_type check (question_type in ('trivia', 'estimation')),
+  constraint question_sessions_question_length check (char_length(question) between 1 and 300),
+  constraint question_sessions_correct_answer check (
+    question_type <> 'trivia'
+    or answered_at is not null
+    or (
+      char_length(trim(correct_answer)) between 1 and 200
+      and cardinality(acceptable_answers) between 1 and 6
+    )
+  ),
+  constraint question_sessions_score_range check (score is null or score between 0 and 100),
+  constraint question_sessions_deviation_range check (deviation_percent is null or deviation_percent >= 0),
+  constraint question_sessions_answer_state check (
+    (answered_at is null and score is null) or (answered_at is not null and score is not null)
+  ),
+  constraint question_sessions_evaluation_state check (
+    (evaluation_token is null) = (evaluation_started_at is null)
+  )
+);
+
+create index question_sessions_user_created_idx
+  on public.question_sessions (user_id, created_at desc);
+create index question_sessions_expiry_idx
+  on public.question_sessions (expires_at)
+  where answered_at is null;
+create index question_sessions_answered_idx
+  on public.question_sessions (answered_at)
+  where answered_at is not null;
+
+comment on table public.question_sessions is
+  'Private server-side question state. No client role receives table privileges.';
+
+-- One row per Gemini-backed action. The reserve_ai_request() transaction in
+-- 0002 serializes per-user checks before inserting here, preventing concurrent
+-- requests from racing past the limits.
+create table public.ai_request_events (
+  id         bigint generated always as identity primary key,
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  action     text not null,
+  created_at timestamptz not null default now(),
+  constraint ai_request_events_action check (action in ('generate', 'evaluate'))
+);
+
+create index ai_request_events_user_action_created_idx
+  on public.ai_request_events (user_id, action, created_at desc);
+create index ai_request_events_created_idx
+  on public.ai_request_events (created_at);
+
+comment on table public.ai_request_events is
+  'Server-only rolling rate-limit ledger for Gemini-backed actions.';
 
 -- ─── updated_at maintenance ──────────────────────────────────────────────────
 create or replace function public.touch_updated_at()

@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": "23.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "diagnostic": {
+      "distribution": "store",
+      "node": "20.19.2",
+      "pnpm": "9.15.5",
+      "corepack": true,
+      "autoIncrement": true,
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "node": "20.19.2",
+      "pnpm": "9.15.5",
+      "corepack": true,
+      "autoIncrement": true,
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      }
+    }
+  },
+  "submit": {
+    "diagnostic": {},
+    "production": {}
+  }
+}

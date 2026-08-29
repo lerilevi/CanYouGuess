@@ -20,7 +20,7 @@ module.exports = {
   expo: {
     name: 'onspace-app',
     slug: 'onspace-app',
-    version: '1.0.0',
+    version: '1.0.7',
     orientation: 'portrait',
     icon: './assets/images/logo.png',
     scheme: 'onspaceapp',

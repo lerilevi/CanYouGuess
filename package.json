@@ -1,14 +1,15 @@
 {
   "name": "onspace-app",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.0.7",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "react-native-google-mobile-ads": "14.7.2",
@@ -67,7 +68,6 @@
     "expo-sensors": "14.1.4",
     "react-native-markdown-display": "^7.0.2",
     "@stripe/stripe-react-native": "0.45.0",
-    "expo-modules-autolinking": "*",
     "react-native-url-polyfill": "^2.0.0",
     "@privacyresearch/libsignal-protocol-typescript": "0.0.16",
     "@react-native-picker/picker": "2.11.0",
@@ -154,5 +154,9 @@
     "react-dev-inspector": "^2.0.1",
     "typescript": "~5.8.3"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.5",
   "private": true
 }

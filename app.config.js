@@ -55,6 +55,7 @@ module.exports = {
     plugins: [
       'expo-router',
       './plugins/withFmtXcode26Fix',
+      './plugins/withNativeFatalReporter',
        [
          'react-native-google-mobile-ads',
          {

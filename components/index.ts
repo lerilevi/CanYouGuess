@@ -8,4 +8,6 @@ export { BadgeCard } from './ui/BadgeCard';
 export { StreakBadge } from './ui/StreakBadge';
 export { ConsentModal } from './feature/ConsentModal';
 export { PaywallScreen } from './feature/PaywallScreen';
-export { PreviousCrashNotice } from './feature/PreviousCrashNotice';
+export { CrashDiagnosticScreen } from './feature/CrashDiagnosticScreen';
+export { CrashDiagnosticGate } from './feature/CrashDiagnosticGate';
+export { RootErrorBoundary } from './feature/RootErrorBoundary';

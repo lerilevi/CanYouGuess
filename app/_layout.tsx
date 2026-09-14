@@ -1,8 +1,3 @@
-// Must be first: installs the global JS error handler before any other module
-// can throw, so a fatal error is persisted and readable on the next launch.
-import { installErrorReporter } from '@/services/errorReporter';
-installErrorReporter();
-
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -12,52 +7,63 @@ import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { StatusBar } from 'expo-status-bar';
 import { initializePurchases, loginPurchasesUser, logoutPurchasesUser } from '@/services/purchasesService';
 import { initializeAds } from '@/services/adService';
-import { PreviousCrashNotice } from '@/components/feature/PreviousCrashNotice';
+import { CrashDiagnosticGate } from '@/components/feature/CrashDiagnosticGate';
+import { RootErrorBoundary } from '@/components/feature/RootErrorBoundary';
+
+/** Starts external SDKs only after the previous-crash gate is clear. */
+function ServiceInitialization() {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      initializePurchases();
+      initializeAds();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return null;
+}
 
 /** Syncs RevenueCat identity whenever the auth user changes. */
 function PurchasesSync() {
   const { user } = useAuth();
 
   useEffect(() => {
-  if (user?.id) {
-    loginPurchasesUser(user.id);
-  } else {
-    logoutPurchasesUser();
-  }
-}, [user?.id]);
+    if (user?.id) {
+      loginPurchasesUser(user.id);
+    } else {
+      logoutPurchasesUser();
+    }
+  }, [user?.id]);
 
   return null;
 }
 
 export default function RootLayout() {
-  useEffect(() => {
-  const timer = setTimeout(() => {
-    initializePurchases();
-    initializeAds();
-  }, 0);
-  return () => clearTimeout(timer);
-}, []);
-
   return (
-    <AlertProvider>
-      <PreviousCrashNotice />
-      <SafeAreaProvider>
-        <AuthProvider>
-          <PurchasesSync />
-          <SubscriptionProvider>
-            <GameProvider>
-              <StatusBar style="light" />
-              <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="index" />
-                <Stack.Screen name="onboarding" />
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen name="login" />
-
-              </Stack>
-            </GameProvider>
-          </SubscriptionProvider>
-        </AuthProvider>
-      </SafeAreaProvider>
-    </AlertProvider>
+    <RootErrorBoundary>
+      <CrashDiagnosticGate>
+        <AlertProvider>
+          <SafeAreaProvider>
+            <AuthProvider>
+              <ServiceInitialization />
+              <PurchasesSync />
+              <SubscriptionProvider>
+                <GameProvider>
+                  <StatusBar style="light" />
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="index" />
+                    <Stack.Screen name="onboarding" />
+                    <Stack.Screen name="(tabs)" />
+                    <Stack.Screen name="login" />
+                    <Stack.Screen name="crash-diagnostics" />
+                    <Stack.Screen name="crash-diagnostics-initial-render" />
+                  </Stack>
+                </GameProvider>
+              </SubscriptionProvider>
+            </AuthProvider>
+          </SafeAreaProvider>
+        </AlertProvider>
+      </CrashDiagnosticGate>
+    </RootErrorBoundary>
   );
 }

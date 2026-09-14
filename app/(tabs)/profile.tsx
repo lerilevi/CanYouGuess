@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth, useAlert } from '@/template';
@@ -34,11 +35,13 @@ import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constan
 
 const PRIVACY_POLICY_URL = 'https://react-9bj8xm.onspace.build';
 const TERMS_URL = 'https://react-9bj8ye.onspace.build';
+const CRASH_DIAGNOSTICS_ENABLED = process.env.EXPO_PUBLIC_ENABLE_CRASH_DIAGNOSTICS === '1';
 
 type EditField = 'username' | 'email' | 'password' | null;
 
 export default function ProfileTab() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { user, logout, refreshSession } = useAuth();
   const { showAlert } = useAlert();
   const { userBadges, loadUserData } = useGame();
@@ -348,6 +351,19 @@ export default function ProfileTab() {
           {/* Settings */}
           <Text style={styles.sectionTitle}>Settings</Text>
           <View style={styles.settingsCard}>
+            {CRASH_DIAGNOSTICS_ENABLED ? (
+              <>
+                <Pressable
+                  onPress={() => router.push('/crash-diagnostics')}
+                  style={({ pressed }) => [styles.settingsRow, { opacity: pressed ? 0.7 : 1 }]}
+                >
+                  <MaterialIcons name="bug-report" size={20} color={Colors.secondary} />
+                  <Text style={styles.settingsLabel}>Crash Diagnostics</Text>
+                  <MaterialIcons name="chevron-right" size={20} color={Colors.textMuted} />
+                </Pressable>
+                <View style={styles.settingsDivider} />
+              </>
+            ) : null}
             <Pressable
               onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
               style={({ pressed }) => [styles.settingsRow, { opacity: pressed ? 0.7 : 1 }]}

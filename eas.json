@@ -9,6 +9,9 @@
       "node": "20.19.2",
       "pnpm": "9.15.5",
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_ENABLE_CRASH_DIAGNOSTICS": "1"
+      },
       "ios": {
         "image": "macos-tahoe-26.5-xcode-26.6"
       }

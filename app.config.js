@@ -29,6 +29,15 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'app.onspace.canyouguess',
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
+        NSCalendarsUsageDescription:
+          'Can You Guess? may access your calendar when you choose to save a game reminder.',
+        NSCameraUsageDescription:
+          'Can You Guess? may access your camera when you choose to take a photo.',
+        NSContactsUsageDescription:
+          'Can You Guess? may access your contacts when you choose to connect with friends.',
+      },
     },
     android: {
       package: 'app.onspace.canyouguess',

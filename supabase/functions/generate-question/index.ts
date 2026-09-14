@@ -36,6 +36,8 @@ const configuredTimeout = Number(Deno.env.get('GEMINI_TIMEOUT_MS') ?? '20000');
 const REQUEST_TIMEOUT_MS = Number.isFinite(configuredTimeout)
   ? Math.min(Math.max(configuredTimeout, 5_000), 60_000)
   : 20_000;
+const MAX_PROVIDER_ATTEMPTS = 3;
+const PROVIDER_RETRY_BASE_DELAY_MS = 500;
 const MAX_REQUEST_BYTES = 16_384;
 
 const QUESTION_SCHEMA = {
@@ -322,26 +324,53 @@ Deno.serve(async (req: Request) => {
         console.error('[generate-question] Missing GEMINI_API_KEY.');
         throw new HttpError(500, 'Server misconfigured');
       }
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      try {
-        const response = await fetch(`${GEMINI_ENDPOINT}/${model}:generateContent`, {
-          method: 'POST',
-          signal: controller.signal,
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature,
-              responseMimeType: 'application/json',
-              responseJsonSchema,
-              thinkingConfig: { thinkingLevel: THINKING_LEVEL },
-            },
-          }),
-        });
+      const requestBody = JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature,
+          responseMimeType: 'application/json',
+          responseJsonSchema,
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL },
+        },
+      });
+
+      for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+        let response: Response;
+        try {
+          response = await fetch(`${GEMINI_ENDPOINT}/${model}:generateContent`, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
+            body: requestBody,
+          });
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            throw new HttpError(504, 'AI provider timed out');
+          }
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+
         if (!response.ok) {
-          console.error(`[generate-question] Gemini returned ${response.status}:`, (await response.text()).slice(0, 500));
+          const responseText = (await response.text()).slice(0, 500);
+          const retryable = response.status === 429 || (response.status >= 500 && response.status <= 599);
+          console.error(
+            `[generate-question] Gemini returned ${response.status} on attempt ${attempt}/${MAX_PROVIDER_ATTEMPTS}:`,
+            responseText,
+          );
+          if (retryable) {
+            if (attempt === MAX_PROVIDER_ATTEMPTS) {
+              throw new HttpError(503, 'AI provider temporarily unavailable');
+            }
+            const retryDelayMs = PROVIDER_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+            console.warn(`[generate-question] Retrying Gemini in ${retryDelayMs}ms.`);
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            continue;
+          }
           throw new Error('AI provider request failed');
         }
         const payload = await response.json();
@@ -355,14 +384,9 @@ Deno.serve(async (req: Request) => {
           .join('');
         if (!text.trim()) throw new Error('AI provider returned an empty response');
         return parseObject(text);
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          throw new HttpError(504, 'AI provider timed out');
-        }
-        throw error;
-      } finally {
-        clearTimeout(timer);
       }
+
+      throw new HttpError(503, 'AI provider temporarily unavailable');
     };
 
     if (action === 'generate') {

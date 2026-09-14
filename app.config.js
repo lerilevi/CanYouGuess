@@ -18,7 +18,7 @@
 
 module.exports = {
   expo: {
-    name: 'onspace-app',
+    name: 'Can You Guess?',
     slug: 'onspace-app',
     version: '1.0.7',
     orientation: 'portrait',

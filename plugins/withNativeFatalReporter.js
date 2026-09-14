@@ -15,15 +15,20 @@ private enum CanYouGuessFatalReporter {
 
     let previousHandler = RCTGetFatalHandler()
     RCTSetFatalHandler { error in
-      persist(error)
+      guard let error else {
+        RCTSetFatalHandler(previousHandler)
+        fatalError("RCTFatal was invoked without an error")
+      }
+      let nsError = error as NSError
+      persist(nsError)
 
       // Restore and invoke React Native's prior handler so release behavior is
       // unchanged: the error is still fatal after the synchronous write.
       RCTSetFatalHandler(previousHandler)
       if let previousHandler {
-        previousHandler(error)
+        previousHandler(nsError)
       } else {
-        RCTFatal(error)
+        RCTFatal(nsError)
       }
     }
   }

@@ -24,7 +24,15 @@
     }
   },
   "submit": {
-    "diagnostic": {},
-    "production": {}
+    "diagnostic": {
+      "ios": {
+        "ascAppId": "6789914222"
+      }
+    },
+    "production": {
+      "ios": {
+        "ascAppId": "6789914222"
+      }
+    }
   }
 }

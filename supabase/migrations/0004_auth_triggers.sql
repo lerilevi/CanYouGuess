@@ -83,13 +83,41 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
-  v_username citext;
+  v_username          citext;
+  v_fallback_username citext;
 begin
   v_username := (new.raw_user_meta_data ->> 'username')::citext;
 
-  insert into public.user_profiles (id, username)
-  values (new.id, v_username)
-  on conflict (id) do nothing;
+  begin
+    insert into public.user_profiles (id, username)
+    values (new.id, v_username)
+    on conflict (id) do nothing;
+  exception
+    when unique_violation then
+      -- BEFORE ROW triggers for a multi-row auth.users INSERT all run before
+      -- these AFTER ROW triggers. Equal seeds can therefore both choose the
+      -- unsuffixed username even though normal concurrent signups are
+      -- serialized by generate_unique_username(). Recover without leaving
+      -- Auth metadata and the public profile out of sync.
+      v_fallback_username := (
+        left(v_username::text, 13)
+        || '_'
+        || left(replace(new.id::text, '-', ''), 10)
+      )::citext;
+
+      update auth.users
+         set raw_user_meta_data = jsonb_set(
+           coalesce(raw_user_meta_data, '{}'::jsonb),
+           '{username}',
+           to_jsonb(v_fallback_username::text),
+           true
+         )
+       where id = new.id;
+
+      insert into public.user_profiles (id, username)
+      values (new.id, v_fallback_username)
+      on conflict (id) do nothing;
+  end;
 
   insert into public.user_stats (user_id)
   values (new.id)

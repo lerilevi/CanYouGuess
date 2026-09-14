@@ -12,7 +12,7 @@
 // and request-limit events, with no ordering to keep in sync as the schema
 // grows.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0';
+import { createClient } from '@supabase/supabase-js';
 import { corsHeaders } from '../_shared/cors.ts';
 
 interface DeleteRequest {

@@ -146,9 +146,11 @@ TEST_USER_ACCESS_TOKEN=<THROWAWAY_USER_JWT> \
 node supabase/tests/edge-functions.mjs
 ```
 
-That performs auth/method/input checks without spending Gemini quota. To run
-one paid generation plus deterministic trivia evaluation/concurrency/replay
-flow, add `RUN_AI_INTEGRATION=1`.
+That performs auth/method/input checks for both functions without spending
+Gemini quota. To run one paid generation plus deterministic trivia
+evaluation/concurrency/replay flow, add `RUN_AI_INTEGRATION=1`. To exercise
+successful account deletion, use a separate disposable user's token and add
+`RUN_DELETE_INTEGRATION=1`; that user will be permanently deleted.
 
 The successful generation response must contain `questionId`, `type`,
 `question`, `hint`, and `expiresAt`, and must not contain `correctAnswer`.
@@ -156,10 +158,10 @@ Evaluation must return authoritative `score` plus refreshed `stats`; of two
 concurrent evaluations exactly one must succeed, and later replay must return
 HTTP 409.
 
-For account deletion, use a separate throwaway account and send
-`{"confirm":"DELETE"}`. The function verifies all application cascades through
-a service-only RPC without receiving direct table privileges; also confirm the
-Auth user is gone in the dashboard.
+For account deletion, the integration flag sends `{"confirm":"DELETE"}`. The
+function verifies all application cascades through a service-only RPC without
+receiving direct table privileges; also confirm the Auth user is gone in the
+dashboard.
 
 ## Client integration requirements
 

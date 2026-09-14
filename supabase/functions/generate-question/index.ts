@@ -1,6 +1,6 @@
 // Authenticated, rate-limited Gemini gateway with server-authoritative scoring.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0';
+import { createClient } from '@supabase/supabase-js';
 import { corsHeaders } from '../_shared/cors.ts';
 
 const SYSTEM_PROMPT = `You are a trivia/estimation game engine for "Can You Guess?". Generate fun questions and evaluate answers.

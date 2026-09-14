@@ -1,6 +1,8 @@
 begin;
 
+set local role postgres;
 create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions;
 select * from no_plan();
 
 -- Fixed ids keep failure output readable.
@@ -124,7 +126,7 @@ update public.user_profiles
    set country = 'US'
  where id = '22222222-2222-4222-8222-222222222222';
 
-reset role;
+set local role postgres;
 select is(
   (select timezone from public.user_profiles where id = '11111111-1111-4111-8111-111111111111'),
   'Asia/Jerusalem',
@@ -171,7 +173,7 @@ select lives_ok(
   $$,
   'service role creates private question sessions'
 );
-reset role;
+set local role postgres;
 select is((select count(*) from public.question_sessions), 2::bigint, 'two sessions were stored');
 
 set local role service_role;
@@ -233,7 +235,7 @@ select lives_ok(
   $$,
   'server finalization atomically records both scores'
 );
-reset role;
+set local role postgres;
 
 select is((select count(*) from public.score_events), 2::bigint, 'one immutable score event exists per session');
 select is(
@@ -270,7 +272,7 @@ select throws_ok(
   '23505', null,
   'a question session cannot be scored twice'
 );
-reset role;
+set local role postgres;
 
 -- Equal scores share a rank; username is only the display-order tiebreaker.
 select set_config(
@@ -292,7 +294,7 @@ select is(
   'equal scores receive the same rank'
 );
 select is((select count(*) from public.score_events), 1::bigint, 'RLS exposes only user A score events');
-reset role;
+set local role postgres;
 
 select throws_ok(
   $$
@@ -327,7 +329,7 @@ select throws_ok(
   '22023', null,
   'unknown rate-limit action is rejected'
 );
-reset role;
+set local role postgres;
 
 -- Deleting auth.users is the single account-deletion source of truth.
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
@@ -361,7 +363,7 @@ select is(
   false,
   'delete-account verification RPC sees no surviving application rows'
 );
-reset role;
+set local role postgres;
 
 select * from finish();
 rollback;

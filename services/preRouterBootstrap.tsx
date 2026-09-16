@@ -21,10 +21,20 @@ import {
 type BootstrapState =
   | { phase: 'checking'; record: null }
   | { phase: 'diagnostic'; record: CapturedCrashRecord }
+  | { phase: 'manual'; record: null }
   | { phase: 'router'; record: null };
 
 interface RouterBoundaryState {
   record: CapturedCrashRecord | null;
+}
+
+const manualRouterStartEnabled =
+  process.env.EXPO_PUBLIC_DIAGNOSTIC_MANUAL_ROUTER_START === '1';
+
+function readyState(): BootstrapState {
+  return manualRouterStartEnabled
+    ? { phase: 'manual', record: null }
+    : { phase: 'router', record: null };
 }
 
 /**
@@ -78,10 +88,10 @@ function PreRouterBootstrap() {
     void getPendingCrashRecord().then(
       (record) => {
         if (!mounted) return;
-        setState(record ? { phase: 'diagnostic', record } : { phase: 'router', record: null });
+        setState(record ? { phase: 'diagnostic', record } : readyState());
       },
       () => {
-        if (mounted) setState({ phase: 'router', record: null });
+        if (mounted) setState(readyState());
       },
     );
     return () => {
@@ -106,8 +116,16 @@ function PreRouterBootstrap() {
         dismissLabel="Dismiss report and retry"
         onDismiss={async () => {
           await dismissPendingCrashRecord();
-          setState({ phase: 'router', record: null });
+          setState(readyState());
         }}
+      />
+    );
+  }
+
+  if (state.phase === 'manual') {
+    return (
+      <ManualStartupShell
+        onStart={() => setState({ phase: 'router', record: null })}
       />
     );
   }
@@ -116,6 +134,40 @@ function PreRouterBootstrap() {
     <RouterImportBoundary>
       <RouterLoader />
     </RouterImportBoundary>
+  );
+}
+
+function ManualStartupShell({ onStart }: { onStart: () => void }) {
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.shellContent}>
+        <Text style={styles.eyebrow}>CAN YOU GUESS? DIAGNOSTICS</Text>
+        <Text style={styles.heading}>Startup shell reached</Text>
+        <Text style={styles.explanation}>
+          This screen loaded before Expo Router, the app layout, providers, and startup services.
+          Tap below when you are ready to load the real app.
+        </Text>
+
+        <View style={styles.card}>
+          <Text style={styles.label}>Build 13 isolation checkpoint</Text>
+          <Text style={styles.shellStatus}>
+            The entry point, crash reporter, saved-record check, and minimal React root all completed.
+          </Text>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={onStart}
+          style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
+        >
+          <Text style={styles.primaryText}>Start Expo Router</Text>
+        </Pressable>
+
+        <Text style={styles.shellHint}>
+          After tapping, note whether the app opens, this screen changes to an error report, or the app closes.
+        </Text>
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -221,6 +273,12 @@ const styles = StyleSheet.create({
   loadingText: { color: '#c9d3ee', fontSize: 14 },
   safeArea: { flex: 1, backgroundColor: '#080c18' },
   content: { flexGrow: 1, padding: 24, gap: 16 },
+  shellContent: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+    gap: 20,
+  },
   eyebrow: { color: '#71d7ff', fontSize: 12, fontWeight: '700', letterSpacing: 1.2 },
   heading: { color: '#ffffff', fontSize: 28, fontWeight: '800' },
   explanation: { color: '#c9d3ee', fontSize: 15, lineHeight: 22 },
@@ -235,6 +293,8 @@ const styles = StyleSheet.create({
   label: { color: '#71d7ff', fontSize: 13, fontWeight: '700' },
   message: { color: '#ffffff', fontSize: 17, lineHeight: 24, fontWeight: '600' },
   metadata: { color: '#93a1c2', fontSize: 12 },
+  shellStatus: { color: '#ffffff', fontSize: 15, lineHeight: 22 },
+  shellHint: { color: '#93a1c2', fontSize: 13, lineHeight: 19, textAlign: 'center' },
   reportCard: {
     minHeight: 220,
     borderRadius: 14,

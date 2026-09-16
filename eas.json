@@ -30,6 +30,13 @@
         "EXPO_PUBLIC_DISABLE_ADMOB_FOR_STARTUP_BISECTION": "1"
       }
     },
+    "diagnostic-manual-router": {
+      "extends": "diagnostic",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_CRASH_DIAGNOSTICS": "1",
+        "EXPO_PUBLIC_DIAGNOSTIC_MANUAL_ROUTER_START": "1"
+      }
+    },
     "production": {
       "distribution": "store",
       "node": "20.19.2",

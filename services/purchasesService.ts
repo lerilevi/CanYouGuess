@@ -18,7 +18,15 @@ import { APP_CONFIG } from '@/constants/config';
 
 type PurchasesModule = typeof import('react-native-purchases');
 
+const REVENUECAT_DISABLED_FOR_STARTUP_BISECTION =
+  process.env.EXPO_PUBLIC_DISABLE_REVENUECAT_FOR_STARTUP_BISECTION === '1';
+
 function getNativePurchases(): PurchasesModule | null {
+  // Diagnostic builds can keep the native dependency linked while preventing
+  // its JavaScript entry point (and NativeEventEmitter setup) from evaluating.
+  // This cleanly isolates RevenueCat without changing the rest of app startup.
+  if (REVENUECAT_DISABLED_FOR_STARTUP_BISECTION) return null;
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('react-native-purchases') as PurchasesModule;

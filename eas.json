@@ -16,6 +16,13 @@
         "image": "macos-tahoe-26.5-xcode-26.6"
       }
     },
+    "diagnostic-revenuecat-off": {
+      "extends": "diagnostic",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_CRASH_DIAGNOSTICS": "1",
+        "EXPO_PUBLIC_DISABLE_REVENUECAT_FOR_STARTUP_BISECTION": "1"
+      }
+    },
     "production": {
       "distribution": "store",
       "node": "20.19.2",

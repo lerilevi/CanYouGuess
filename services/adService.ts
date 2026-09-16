@@ -13,7 +13,14 @@ import { Platform } from 'react-native';
 
 // ─── Lazy native module access ────────────────────────────────────────────────
 
+const ADMOB_DISABLED_FOR_STARTUP_BISECTION =
+  process.env.EXPO_PUBLIC_DISABLE_ADMOB_FOR_STARTUP_BISECTION === '1';
+
 function getNativeAds() {
+  // Keep AdMob linked into the diagnostic binary, but skip evaluation of its
+  // JavaScript entry point so startup behavior can be isolated independently.
+  if (ADMOB_DISABLED_FOR_STARTUP_BISECTION) return null;
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('react-native-google-mobile-ads') as typeof import('react-native-google-mobile-ads');

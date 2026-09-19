@@ -94,13 +94,34 @@ export function createCrashRecord(
   };
 }
 
-export async function persistCrashRecord(record: CapturedCrashRecord): Promise<void> {
-  try {
-    await asyncStorage().setItem(LAST_FATAL_KEY, JSON.stringify(record));
-  } catch {
-    // The native RCTFatal hook is the final synchronous fallback for fatal
-    // errors. There is no safe recovery action if JS storage is unavailable.
+let firstSessionRecord: CapturedCrashRecord | null = null;
+let firstSessionPersistPromise: Promise<void> | null = null;
+
+/**
+ * Persists only the first error observed in this JS session. Secondary errors
+ * (for example, a failed property access after Metro has already reported a
+ * module-initialisation error) must not replace the primary diagnostic.
+ */
+export function persistCrashRecord(record: CapturedCrashRecord): Promise<void> {
+  if (firstSessionRecord) {
+    return firstSessionPersistPromise ?? Promise.resolve();
   }
+
+  firstSessionRecord = record;
+  firstSessionPersistPromise = (async () => {
+    try {
+      const storage = asyncStorage();
+      const existing = await storage.getItem(LAST_FATAL_KEY);
+      if (existing === null) {
+        await storage.setItem(LAST_FATAL_KEY, JSON.stringify(record));
+      }
+    } catch {
+      // The native RCTFatal hook is the final synchronous fallback for fatal
+      // errors. There is no safe recovery action if JS storage is unavailable.
+    }
+  })();
+
+  return firstSessionPersistPromise;
 }
 
 function malformedRecord(raw: string, source: CrashSource, reason: unknown): CapturedCrashRecord {
@@ -145,6 +166,54 @@ function parseRecord(raw: string, fallbackSource: CrashSource): CapturedCrashRec
 }
 
 let installed = false;
+
+/**
+ * Runs one synchronous operation with a temporary fatal-error interceptor.
+ * Metro reports module-factory failures to ErrorUtils and then returns
+ * `undefined`; retaining the first reported error lets the caller throw that
+ * primary failure into a React boundary instead of producing a secondary
+ * "property of undefined" error. Non-fatal reports still use the installed
+ * global handler.
+ */
+export function captureFirstFatalDuring<T>(operation: () => T): T {
+  const errorUtils = (globalThis as { ErrorUtils?: ErrorUtilsLike }).ErrorUtils;
+  if (!errorUtils) return operation();
+
+  const previousHandler = errorUtils.getGlobalHandler();
+  let captured = false;
+  let firstError: unknown;
+
+  const interceptor = (error: unknown, isFatal?: boolean) => {
+    if (isFatal === false) {
+      previousHandler(error, isFatal);
+      return;
+    }
+    if (!captured) {
+      captured = true;
+      firstError = error;
+    }
+  };
+
+  errorUtils.setGlobalHandler(interceptor);
+  let result: T | undefined;
+  let directError: unknown;
+  let threwDirectly = false;
+
+  try {
+    result = operation();
+  } catch (error) {
+    threwDirectly = true;
+    directError = error;
+  } finally {
+    if (errorUtils.getGlobalHandler() === interceptor) {
+      errorUtils.setGlobalHandler(previousHandler);
+    }
+  }
+
+  if (threwDirectly) throw directError;
+  if (captured) throw firstError;
+  return result as T;
+}
 
 /**
  * Installs global error and rejection handlers. The fatal handler gives the
@@ -236,12 +305,17 @@ export async function getPendingCrashRecord(): Promise<CapturedCrashRecord | nul
 
 /** Deletes pending native and JS copies only after an explicit user action. */
 export async function dismissPendingCrashRecord(): Promise<void> {
+  if (firstSessionPersistPromise) {
+    await firstSessionPersistPromise;
+  }
   const removals: Promise<unknown>[] = [asyncStorage().removeItem(LAST_FATAL_KEY)];
   const uri = nativeFatalUri();
   if (uri) {
     removals.push(legacyFileSystem().deleteAsync(uri, { idempotent: true }));
   }
   await Promise.allSettled(removals);
+  firstSessionRecord = null;
+  firstSessionPersistPromise = null;
 }
 
 /** Formats a captured error into a block suitable for a bug report. */

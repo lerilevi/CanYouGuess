@@ -11,6 +11,7 @@ import {
 import { registerRootComponent } from 'expo';
 import {
   CapturedCrashRecord,
+  captureFirstFatalDuring,
   createCrashRecord,
   dismissPendingCrashRecord,
   formatForReport,
@@ -43,9 +44,19 @@ function readyState(): BootstrapState {
  * catch synchronous route and layout module evaluation failures.
  */
 function RouterLoader() {
-  // This is the same component used by expo-router/entry-classic.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const RouterApp = require('expo-router/build/qualified-entry').App as () => ReactNode;
+  const routerEntry = captureFirstFatalDuring(() => {
+    // This is the same component used by expo-router/entry-classic. Metro's
+    // guarded loader reports a module-factory error to ErrorUtils and returns
+    // undefined, so the interceptor above must run around this exact require.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-router/build/qualified-entry') as
+      | { App?: () => ReactNode }
+      | undefined;
+  });
+  if (!routerEntry?.App) {
+    throw new Error('Expo Router qualified-entry loaded without an App export.');
+  }
+  const RouterApp = routerEntry.App;
   return <RouterApp />;
 }
 
@@ -149,9 +160,9 @@ function ManualStartupShell({ onStart }: { onStart: () => void }) {
         </Text>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Build 13 isolation checkpoint</Text>
+          <Text style={styles.label}>Build 14 primary-error checkpoint</Text>
           <Text style={styles.shellStatus}>
-            The entry point, crash reporter, saved-record check, and minimal React root all completed.
+            The first fatal raised while Expo Router loads will be shown here without a secondary error replacing it.
           </Text>
         </View>
 

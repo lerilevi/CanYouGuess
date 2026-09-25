@@ -30,6 +30,15 @@ interface RouterBoundaryState {
   record: CapturedCrashRecord | null;
 }
 
+type ExpoModuleMap = Record<string, unknown>;
+
+interface ExpoLinkingLookupTrace {
+  before: string;
+  afterFailure?: string;
+}
+
+let routerLookupTrace: ExpoLinkingLookupTrace | null = null;
+
 const manualRouterStartEnabled =
   process.env.EXPO_PUBLIC_DIAGNOSTIC_MANUAL_ROUTER_START === '1';
 
@@ -40,10 +49,9 @@ function readyState(): BootstrapState {
 }
 
 function inspectExpoModuleBridge(): string {
-  type ModuleMap = Record<string, unknown>;
-  type ExpoGlobal = { modules?: ModuleMap };
+  type ExpoGlobal = { modules?: ExpoModuleMap };
   const expoGlobal = () => (globalThis as { expo?: ExpoGlobal }).expo;
-  const describe = (modules: ModuleMap | undefined) => {
+  const describe = (modules: ExpoModuleMap | undefined) => {
     if (!modules) return 'absent';
     const names = Object.keys(modules);
     const samples = ['ExpoLinking', 'ExpoClipboard', 'ExpoFileSystem', 'ExpoConstants'];
@@ -53,14 +61,13 @@ function inspectExpoModuleBridge(): string {
 
   try {
     const before = describe(expoGlobal()?.modules);
-    // Reading these React Native modules initializes the bridge's legacy Expo
-    // proxy, which is where the generated provider registers Swift modules.
+    // This is a legacy compatibility table, not the Swift module registry.
     const core = NativeModules.ExpoModulesCore as { installModules?: () => void } | undefined;
     const proxy = NativeModules.NativeUnimoduleProxy as
-      | { exportedMethods?: ModuleMap }
+      | { exportedMethods?: ExpoModuleMap }
       | undefined;
     const afterProxy = describe(expoGlobal()?.modules);
-    const nativeRegistry = describe(proxy?.exportedMethods);
+    const legacyProxyExports = describe(proxy?.exportedMethods);
 
     let install = 'unavailable';
     if (typeof core?.installModules === 'function') {
@@ -76,7 +83,7 @@ function inspectExpoModuleBridge(): string {
       `JSI before probe: ${before}`,
       `ExpoModulesCore: ${core ? 'present' : 'absent'}`,
       `NativeUnimoduleProxy: ${proxy ? 'present' : 'absent'}`,
-      `Native registry: ${nativeRegistry}`,
+      `Legacy proxy exports: ${legacyProxyExports}`,
       `JSI after proxy: ${afterProxy}`,
       `installModules: ${install}`,
       `JSI after install: ${describe(expoGlobal()?.modules)}`,
@@ -86,33 +93,105 @@ function inspectExpoModuleBridge(): string {
   }
 }
 
+function describeLookupValue(value: unknown): string {
+  return value === null ? 'null' : typeof value;
+}
+
+function describeLookupError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function inspectExpoLinkingLookup(previousHost?: ExpoModuleMap): {
+  report: string;
+  host: ExpoModuleMap | undefined;
+} {
+  const host = (globalThis as { expo?: { modules?: ExpoModuleMap } }).expo?.modules;
+  const lines: string[] = [];
+
+  try {
+    const names = host ? Object.keys(host) : [];
+    const listed = names.includes('ExpoLinking');
+    const own = host ? Object.prototype.hasOwnProperty.call(host, 'ExpoLinking') : false;
+    lines.push(`JSI: ${host ? `${names.length} names` : 'absent'}; ExpoLinking listed=${listed}; own=${own}`);
+  } catch (error) {
+    lines.push(`JSI enumeration threw ${describeLookupError(error)}`);
+  }
+
+  let directValue: unknown;
+  let directReadSucceeded = false;
+  try {
+    directValue = host?.ExpoLinking;
+    directReadSucceeded = true;
+    lines.push(`Direct ExpoLinking value: ${describeLookupValue(directValue)}`);
+  } catch (error) {
+    lines.push(`Direct ExpoLinking read threw ${describeLookupError(error)}`);
+  }
+
+  try {
+    // Deliberately load this inside the probe, not at module evaluation time.
+    // This is the exact helper used by expo-linking's native entry point.
+    const optionalValue = captureFirstFatalDuring(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const core = require('expo-modules-core') as {
+        requireOptionalNativeModule: (name: string) => unknown;
+      };
+      return core.requireOptionalNativeModule('ExpoLinking');
+    });
+    lines.push(`requireOptionalNativeModule: ${describeLookupValue(optionalValue)}`);
+    if (directReadSucceeded && directValue != null && optionalValue != null) {
+      lines.push(`Optional matches direct: ${Object.is(optionalValue, directValue)}`);
+    }
+  } catch (error) {
+    lines.push(`requireOptionalNativeModule threw ${describeLookupError(error)}`);
+  }
+
+  const currentHost = (globalThis as { expo?: { modules?: ExpoModuleMap } }).expo?.modules;
+  lines.push(`JSI host changed during probe: ${currentHost !== host}`);
+  if (previousHost) lines.push(`JSI host changed since before Router: ${currentHost !== previousHost}`);
+  return { report: lines.join('\n'), host: currentHost };
+}
+
 /**
  * Loads Expo Router only after the native/JS crash stores have been checked.
  * Keeping this require inside a child render lets the surrounding boundary
  * catch synchronous route and layout module evaluation failures.
  */
 function RouterLoader() {
-  const routerEntry = captureFirstFatalDuring(() => {
-    // This is the same component used by expo-router/entry-classic. Metro's
-    // guarded loader reports a module-factory error to ErrorUtils and returns
-    // undefined, so the interceptor above must run around this exact require.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('expo-router/build/qualified-entry') as
-      | { App?: () => ReactNode }
-      | undefined;
-  });
-  if (!routerEntry?.App) {
-    throw new Error('Expo Router qualified-entry loaded without an App export.');
+  const before = inspectExpoLinkingLookup();
+  routerLookupTrace = { before: before.report };
+  try {
+    const routerEntry = captureFirstFatalDuring(() => {
+      // This is the same component used by expo-router/entry-classic. Metro's
+      // guarded loader reports a module-factory error to ErrorUtils and returns
+      // undefined, so the interceptor above must run around this exact require.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require('expo-router/build/qualified-entry') as
+        | { App?: () => ReactNode }
+        | undefined;
+    });
+    if (!routerEntry?.App) {
+      throw new Error('Expo Router qualified-entry loaded without an App export.');
+    }
+    const RouterApp = routerEntry.App;
+    return <RouterApp />;
+  } catch (error) {
+    routerLookupTrace.afterFailure = inspectExpoLinkingLookup(before.host).report;
+    throw error;
   }
-  const RouterApp = routerEntry.App;
-  return <RouterApp />;
 }
 
 class RouterImportBoundary extends Component<{ children: ReactNode }, RouterBoundaryState> {
   state: RouterBoundaryState = { record: null };
 
   static getDerivedStateFromError(error: unknown): RouterBoundaryState {
-    return { record: createCrashRecord(error, 'render-boundary', true) };
+    return {
+      record: createCrashRecord(
+        error,
+        'render-boundary',
+        true,
+        routerLookupTrace ? { expoLinkingLookup: { ...routerLookupTrace } } : undefined,
+      ),
+    };
   }
 
   componentDidCatch(_error: unknown) {
@@ -254,6 +333,12 @@ function PreRouterCrashScreen({
   onDismiss,
 }: PreRouterCrashScreenProps) {
   const report = useMemo(() => formatForReport(record), [record]);
+  const lookupTrace =
+    record.details &&
+    typeof record.details === 'object' &&
+    'expoLinkingLookup' in record.details
+      ? (record.details.expoLinkingLookup as ExpoLinkingLookupTrace)
+      : null;
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [dismissing, setDismissing] = useState(false);
 
@@ -295,6 +380,15 @@ function PreRouterCrashScreen({
             {record.source}{record.isFatal ? ' · fatal' : ' · non-fatal'}
           </Text>
         </View>
+
+        {lookupTrace && (
+          <View style={styles.card}>
+            <Text style={styles.label}>ExpoLinking lookup around Router import</Text>
+            <Text selectable style={styles.moduleCheck}>
+              {`Before:\n${lookupTrace.before}\n\nAfter failure:\n${lookupTrace.afterFailure ?? '(Router import did not fail)'}`}
+            </Text>
+          </View>
+        )}
 
         <Text style={styles.label}>Full report</Text>
         <View style={styles.reportCard}>

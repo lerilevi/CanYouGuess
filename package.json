@@ -9,7 +9,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "eas-build-on-complete": "node scripts/report-expo-provider.cjs"
   },
   "dependencies": {
     "react-native-google-mobile-ads": "14.7.2",
@@ -160,7 +161,8 @@
   "packageManager": "pnpm@9.15.5",
   "pnpm": {
     "patchedDependencies": {
-      "@stripe/stripe-react-native@0.45.0": "patches/@stripe__stripe-react-native@0.45.0.patch"
+      "@stripe/stripe-react-native@0.45.0": "patches/@stripe__stripe-react-native@0.45.0.patch",
+      "expo-modules-core@2.4.0": "patches/expo-modules-core@2.4.0.patch"
     }
   },
   "private": true

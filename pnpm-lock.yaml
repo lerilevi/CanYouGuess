@@ -8,6 +8,9 @@ patchedDependencies:
   '@stripe/stripe-react-native@0.45.0':
     hash: z3755mrhwtaahmkfdbi4qio7rm
     path: patches/@stripe__stripe-react-native@0.45.0.patch
+  expo-modules-core@2.4.0:
+    hash: psdujotw3c6tr4zt2rkzrbpzty
+    path: patches/expo-modules-core@2.4.0.patch
 
 importers:
 
@@ -10168,7 +10171,7 @@ snapshots:
       require-from-string: 2.0.2
       resolve-from: 5.0.0
 
-  expo-modules-core@2.4.0:
+  expo-modules-core@2.4.0(patch_hash=psdujotw3c6tr4zt2rkzrbpzty):
     dependencies:
       invariant: 2.2.4
 
@@ -10354,7 +10357,7 @@ snapshots:
       expo-font: 13.3.1(expo@53.0.12(@babel/core@7.27.4)(@expo/metro-runtime@5.0.4(react-native@0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0)))(graphql@15.10.3)(react-native-webview@13.13.5(react-native@0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0))(react@19.0.0))(react-native@0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0))(react@19.0.0))(react@19.0.0)
       expo-keep-awake: 14.1.4(expo@53.0.12(@babel/core@7.27.4)(@expo/metro-runtime@5.0.4(react-native@0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0)))(graphql@15.10.3)(react-native-webview@13.13.5(react-native@0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0))(react@19.0.0))(react-native@0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0))(react@19.0.0))(react@19.0.0)
       expo-modules-autolinking: 2.1.12
-      expo-modules-core: 2.4.0
+      expo-modules-core: 2.4.0(patch_hash=psdujotw3c6tr4zt2rkzrbpzty)
       react: 19.0.0
       react-native: 0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0)
       react-native-edge-to-edge: 1.6.0(react-native@0.79.3(@babel/core@7.27.4)(@types/react@19.0.14)(react@19.0.0))(react@19.0.0)

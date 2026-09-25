@@ -35,6 +35,8 @@ type ExpoModuleMap = Record<string, unknown>;
 interface ExpoLinkingLookupTrace {
   before: string;
   afterFailure?: string;
+  nativeBefore?: string;
+  nativeAfterFailure?: string;
 }
 
 let routerLookupTrace: ExpoLinkingLookupTrace | null = null;
@@ -101,6 +103,21 @@ function describeLookupError(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
+function inspectNativeRegistration(): string {
+  try {
+    const core = NativeModules.ExpoModulesCore as
+      | { getRegistrationDiagnostics?: () => Record<string, unknown> }
+      | undefined;
+    if (typeof core?.getRegistrationDiagnostics !== 'function') {
+      return 'ExpoModulesCore.getRegistrationDiagnostics unavailable';
+    }
+    const report = core.getRegistrationDiagnostics();
+    return JSON.stringify(report, null, 2);
+  } catch (error) {
+    return `Native AppContext inspection failed: ${describeLookupError(error)}`;
+  }
+}
+
 function inspectExpoLinkingLookup(previousHost?: ExpoModuleMap): {
   report: string;
   host: ExpoModuleMap | undefined;
@@ -157,8 +174,9 @@ function inspectExpoLinkingLookup(previousHost?: ExpoModuleMap): {
  * catch synchronous route and layout module evaluation failures.
  */
 function RouterLoader() {
+  const nativeBefore = inspectNativeRegistration();
   const before = inspectExpoLinkingLookup();
-  routerLookupTrace = { before: before.report };
+  routerLookupTrace = { before: before.report, nativeBefore };
   try {
     const routerEntry = captureFirstFatalDuring(() => {
       // This is the same component used by expo-router/entry-classic. Metro's
@@ -176,6 +194,7 @@ function RouterLoader() {
     return <RouterApp />;
   } catch (error) {
     routerLookupTrace.afterFailure = inspectExpoLinkingLookup(before.host).report;
+    routerLookupTrace.nativeAfterFailure = inspectNativeRegistration();
     throw error;
   }
 }
@@ -297,7 +316,7 @@ function ManualStartupShell({ onStart }: { onStart: () => void }) {
 
         <Pressable
           accessibilityRole="button"
-          onPress={() => setModuleCheck(inspectExpoModuleBridge())}
+          onPress={() => setModuleCheck(`${inspectNativeRegistration()}\n\n${inspectExpoModuleBridge()}`)}
           style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
         >
           <Text style={styles.secondaryText}>Inspect native modules</Text>
@@ -386,6 +405,15 @@ function PreRouterCrashScreen({
             <Text style={styles.label}>ExpoLinking lookup around Router import</Text>
             <Text selectable style={styles.moduleCheck}>
               {`Before:\n${lookupTrace.before}\n\nAfter failure:\n${lookupTrace.afterFailure ?? '(Router import did not fail)'}`}
+            </Text>
+          </View>
+        )}
+
+        {lookupTrace?.nativeBefore && (
+          <View style={styles.card}>
+            <Text style={styles.label}>Native AppContext registration</Text>
+            <Text selectable style={styles.moduleCheck}>
+              {`Before Router:\n${lookupTrace.nativeBefore}\n\nAfter failure:\n${lookupTrace.nativeAfterFailure ?? '(Router import did not fail)'}`}
             </Text>
           </View>
         )}

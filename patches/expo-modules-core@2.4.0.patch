@@ -1,0 +1,47 @@
+diff --git a/ios/Core/AppContext.swift b/ios/Core/AppContext.swift
+index 9ee54a1..534a9b7 100644
+--- a/ios/Core/AppContext.swift
++++ b/ios/Core/AppContext.swift
+@@ -146,5 +146,27 @@ public final class AppContext: NSObject {
+     return useModulesProvider(Self.modulesProvider(withName: providerName))
+   }
+ 
++  /** Temporary build-17 diagnostic: report this exact AppContext's registration. */
++  @objc
++  public func diagnosticModuleRegistration() -> [String: Any] {
++    let bundleName = Bundle.main.infoDictionary?["CFBundleName"] as? String ?? ""
++    let qualifiedName = "\(bundleName).ExpoModulesProvider"
++    let provider = Self.modulesProvider(withName: "ExpoModulesProvider")
++    let providerClassNames = provider.getModuleClasses().map { String(reflecting: $0) }.sorted()
++    let registeredNames = moduleRegistry.getModuleNames().sorted()
++    return [
++      "bundleName": bundleName,
++      "qualifiedProviderName": qualifiedName,
++      "qualifiedProviderFound": NSClassFromString(qualifiedName) != nil,
++      "unqualifiedProviderFound": NSClassFromString("ExpoModulesProvider") != nil,
++      "selectedProviderClass": NSStringFromClass(type(of: provider)),
++      "providerClassNames": providerClassNames,
++      "registeredModuleNames": registeredNames,
++      "reactBridgePresent": reactBridge != nil,
++      "legacyProxyPresent": legacyModulesProxy != nil,
++      "appContextAddress": String(describing: Unmanaged.passUnretained(self).toOpaque())
++    ]
++  }
++
+   @discardableResult
+   public func useModulesProvider(_ provider: ModulesProvider) -> Self {
+diff --git a/ios/Core/ExpoBridgeModule.mm b/ios/Core/ExpoBridgeModule.mm
+index 740d609..b6c51a0 100644
+--- a/ios/Core/ExpoBridgeModule.mm
++++ b/ios/Core/ExpoBridgeModule.mm
+@@ -87,4 +87,10 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(installModules)
+   return nil;
+ }
+ 
++// Temporary build-17 diagnostic. Read the same AppContext used by the JSI host.
++RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(getRegistrationDiagnostics)
++{
++  return [_appContext diagnosticModuleRegistration];
++}
++
+ @end

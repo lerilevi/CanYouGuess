@@ -31,8 +31,6 @@ module.exports = {
       bundleIdentifier: 'app.onspace.canyouguess',
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
-        NSCalendarsUsageDescription:
-          'Can You Guess? may access your calendar when you choose to save a game reminder.',
         NSCameraUsageDescription:
           'Can You Guess? may access your camera when you choose to take a photo.',
         NSContactsUsageDescription:

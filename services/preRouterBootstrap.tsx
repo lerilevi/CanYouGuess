@@ -1,6 +1,7 @@
 import { Component, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  NativeModules,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -36,6 +37,53 @@ function readyState(): BootstrapState {
   return manualRouterStartEnabled
     ? { phase: 'manual', record: null }
     : { phase: 'router', record: null };
+}
+
+function inspectExpoModuleBridge(): string {
+  type ModuleMap = Record<string, unknown>;
+  type ExpoGlobal = { modules?: ModuleMap };
+  const expoGlobal = () => (globalThis as { expo?: ExpoGlobal }).expo;
+  const describe = (modules: ModuleMap | undefined) => {
+    if (!modules) return 'absent';
+    const names = Object.keys(modules);
+    const samples = ['ExpoLinking', 'ExpoClipboard', 'ExpoFileSystem', 'ExpoConstants'];
+    const present = samples.filter((name) => Object.prototype.hasOwnProperty.call(modules, name));
+    return `${names.length} names; ${present.length ? present.join(', ') : 'none of the sample modules'}`;
+  };
+
+  try {
+    const before = describe(expoGlobal()?.modules);
+    // Reading these React Native modules initializes the bridge's legacy Expo
+    // proxy, which is where the generated provider registers Swift modules.
+    const core = NativeModules.ExpoModulesCore as { installModules?: () => void } | undefined;
+    const proxy = NativeModules.NativeUnimoduleProxy as
+      | { exportedMethods?: ModuleMap }
+      | undefined;
+    const afterProxy = describe(expoGlobal()?.modules);
+    const nativeRegistry = describe(proxy?.exportedMethods);
+
+    let install = 'unavailable';
+    if (typeof core?.installModules === 'function') {
+      try {
+        core.installModules();
+        install = 'completed';
+      } catch (error) {
+        install = `failed: ${String(error)}`;
+      }
+    }
+
+    return [
+      `JSI before probe: ${before}`,
+      `ExpoModulesCore: ${core ? 'present' : 'absent'}`,
+      `NativeUnimoduleProxy: ${proxy ? 'present' : 'absent'}`,
+      `Native registry: ${nativeRegistry}`,
+      `JSI after proxy: ${afterProxy}`,
+      `installModules: ${install}`,
+      `JSI after install: ${describe(expoGlobal()?.modules)}`,
+    ].join('\n');
+  } catch (error) {
+    return `Bridge inspection failed: ${String(error)}`;
+  }
 }
 
 /**
@@ -149,9 +197,10 @@ function PreRouterBootstrap() {
 }
 
 function ManualStartupShell({ onStart }: { onStart: () => void }) {
+  const [moduleCheck, setModuleCheck] = useState('Tap below to inspect the native registry.');
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.shellContent}>
+      <ScrollView contentContainerStyle={styles.shellContent}>
         <Text style={styles.eyebrow}>CAN YOU GUESS? DIAGNOSTICS</Text>
         <Text style={styles.heading}>Startup shell reached</Text>
         <Text style={styles.explanation}>
@@ -160,11 +209,20 @@ function ManualStartupShell({ onStart }: { onStart: () => void }) {
         </Text>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Build 14 primary-error checkpoint</Text>
+          <Text style={styles.label}>Expo native module checkpoint</Text>
           <Text style={styles.shellStatus}>
-            The first fatal raised while Expo Router loads will be shown here without a secondary error replacing it.
+            Inspect the bridge, then start Expo Router. Capture this panel if startup fails.
           </Text>
+          <Text selectable style={styles.moduleCheck}>{moduleCheck}</Text>
         </View>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setModuleCheck(inspectExpoModuleBridge())}
+          style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
+        >
+          <Text style={styles.secondaryText}>Inspect native modules</Text>
+        </Pressable>
 
         <Pressable
           accessibilityRole="button"
@@ -177,7 +235,7 @@ function ManualStartupShell({ onStart }: { onStart: () => void }) {
         <Text style={styles.shellHint}>
           After tapping, note whether the app opens, this screen changes to an error report, or the app closes.
         </Text>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -285,7 +343,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#080c18' },
   content: { flexGrow: 1, padding: 24, gap: 16 },
   shellContent: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
     gap: 20,
@@ -305,6 +363,7 @@ const styles = StyleSheet.create({
   message: { color: '#ffffff', fontSize: 17, lineHeight: 24, fontWeight: '600' },
   metadata: { color: '#93a1c2', fontSize: 12 },
   shellStatus: { color: '#ffffff', fontSize: 15, lineHeight: 22 },
+  moduleCheck: { color: '#d7e2ff', fontFamily: 'Courier', fontSize: 12, lineHeight: 18 },
   shellHint: { color: '#93a1c2', fontSize: 13, lineHeight: 19, textAlign: 'center' },
   reportCard: {
     minHeight: 220,

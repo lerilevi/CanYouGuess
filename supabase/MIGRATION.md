@@ -1,7 +1,22 @@
 # Can You Guess? — Supabase migration and verification runbook
 
-Nothing in this directory has been applied to production yet. Keep the app on
-the OnSpace backend until every local and linked-project check below passes.
+Keep the app on the OnSpace backend until every local and linked-project
+check below passes against the exact target versions. This runbook does not
+certify the current hosted deployment state.
+
+### October 4 planning update
+
+The client has not cut over. The developer has approved an empty beta reset;
+the earlier roadmap reports successful deployment/testing of the new empty
+project, which must be freshly verified at integration. No hosted changes were
+made during the October 4 branch merge.
+
+The target product contract is now 15 free questions plus one bonus question
+per verified rewarded ad, with no daily product reward cap. Earlier 15+3
+references below describe the old client, not the approved target. See
+`../planning/DECISIONS_AND_CONTRACTS_2026-10-04.md` for the proposed server reward
+flow, separate abuse controls and shared ranked-competition review. These are
+not yet implemented by the current migrations/functions.
 
 ## Security model
 
@@ -29,7 +44,7 @@ per 24 hours; 24 Gemini estimation evaluations/minute and 600 per 24 hours).
 Deterministic trivia evaluation does not spend Gemini quota. These limits are
 not the product's free/paid entitlement gate. RevenueCat webhook synchronization
 and AdMob server-side verification are separate integration work and must be
-completed before the client-side 15+3 limit can be considered authoritative.
+completed before any client-side allowance can be considered authoritative.
 Expired unanswered sessions, old answered sessions, and rate-limit events are
 pruned in bounded batches during later AI reservations.
 

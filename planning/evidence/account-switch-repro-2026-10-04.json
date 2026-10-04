@@ -1,0 +1,51 @@
+{
+  "kind": "offline-source-reproduction",
+  "react": "19.0.0",
+  "networkCalls": 0,
+  "aiSpendUSD": 0,
+  "results": [
+    {
+      "case": "A result -> logout -> B + B data reload",
+      "phase": "result",
+      "statsOwner": "B",
+      "visibleAnswer": "answer-from-account-A",
+      "defectReproduced": true
+    },
+    {
+      "case": "A bonus/AI consent -> B",
+      "bonusB": 1,
+      "aiConsentB": true,
+      "defectReproduced": true
+    },
+    {
+      "case": "B stats fetch unavailable",
+      "statsOwnerB": "A",
+      "questionsTodayB": 12,
+      "defectReproduced": true
+    },
+    {
+      "case": "Late A stats after B reload",
+      "statsOwnerB": "A",
+      "questionsTodayB": 9,
+      "defectReproduced": true
+    },
+    {
+      "case": "Late A generation after B login",
+      "phaseB": "question",
+      "questionB": "A pending fixture?",
+      "defectReproduced": true
+    },
+    {
+      "case": "Late A entitlement refresh after B refresh",
+      "isPaidB": true,
+      "defectReproduced": true,
+      "note": "Controlled JS race; not a real RevenueCat transfer test"
+    },
+    {
+      "case": "Auth identity sync before SDK initialization completes",
+      "nativeLogInCalls": 0,
+      "defectReproduced": true,
+      "note": "Service drops sync; no queue/retry"
+    }
+  ]
+}

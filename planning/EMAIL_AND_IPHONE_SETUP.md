@@ -2,6 +2,8 @@
 
 Instructions only: no domain purchase, SMTP configuration, device registration or new build has been performed.
 
+Latest October 4 decision: **do not buy a domain yet**. Mandatory email signup is under independent review; the domain/SMTP instructions below apply only if email signup or later email linking is selected. Build 19's physical-device startup baseline now passes the user's checks; account isolation is a separate blocking defect. Native batch remains unapproved. See [independent assessment](INDEPENDENT_ASSESSMENT_2026-10-04.md).
+
 ## What to buy
 
 Recommend **canyouguessapp.com**, one year, through Cloudflare Registrar, with auto-renew and account 2FA. The public .com registry returned no registered record for this name (HTTP 404) on October 4; the registrar checkout is the definitive availability check, and availability can change. Backup candidate: canyouguessgame.com, also no registered record at that check. Do not buy an aftermarket/premium name just to unblock email.
@@ -87,4 +89,4 @@ With the same bundle ID, the development client replaces the TestFlight installa
 
 ## What to send back
 
-Build 19 device result; chosen/registered domain; whether Resend is ready; the public DNS records only (not keys); two test email providers; confirmation device:list shows the iPhone. Age/ranked-mode and native-batch decisions remain separate.
+Identity/recovery decision first; confirmation device:list shows the iPhone; approval of the exact native batch. Adults-only is approved and ranked mode postponed. Only if email is selected: chosen/registered domain, whether Resend is ready, public DNS records (not keys) and two test email providers. No domain purchase is requested now.

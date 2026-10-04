@@ -9,8 +9,9 @@ Recorded October 4, 2026. This is a design document, not deployed behavior. The 
 - Keep the existing 15-free-question daily allowance as the baseline pending the contract review. One verified rewarded ad grants one bonus question. Remove the former three-bonus product cap from the target design. There is no player-visible daily rewarded quota.
 - Reward value, technical abuse limits and ad cooldown are server-side configuration. Current product reward value is one; a later value change must also update the offer the player sees.
 - Do not publish an unlimited lifetime-play promise until economics findings are written and the product promise is approved. Existing draft Terms still contain such wording and are not publication-ready.
-- Target English-reading/writing players across countries. Age remains a separate decision; adults-only first beta is the recommendation, not an approved policy yet. Store/provider country availability and consent requirements still need verification before broad distribution.
-- Build 19 remains untouched. On October 4, read-only checks confirmed its EAS submission finished, App Store processing is VALID and internal TestFlight state is IN_BETA_TESTING. Device direct-boot tests remain outstanding. October usage: 1/15 iOS builds, 0/15 Android builds.
+- Target English-reading/writing players across countries, with adults-only (18+) first beta now approved. Store/provider country availability and privacy/consent requirements still need verification before broad distribution.
+- Ranked mode is postponed until after the independent idea comparison. The ranking section below is an earlier proposal only, not an implementation gate. Email-signup choice and domain purchase are on hold; no native batch is approved.
+- Build 19 remains untouched. The user reports physical-iPhone direct boot, five force-quit launches, generation and non-premium paywall passed, but an account-switch answer leak appeared. The real client source reproduced that leak and six related identity/storage races offline; see [independent assessment](INDEPENDENT_ASSESSMENT_2026-10-04.md). October usage last checked: 1/15 iOS, 0/15 Android; zero builds spent on this investigation.
 - Backend commits ddfb7a0, 4c124c8 and dbdb6a2 have been pushed to onspace-exit-prep. integration/onspace-exit was created from bc0471c and merged with dbdb6a2 in cf64b0d. main remains 3472d82. Source merge is not backend deployment or client cutover; the .v2 services remain unwired.
 
 ## Reward contract
@@ -62,6 +63,8 @@ No daily product cap is a product decision, not a guarantee of limitless AdMob a
 
 ## Leaderboard contract review — recommendation, not implemented
 
+Superseded scope decision: ranked mode is postponed. Preserve these prior design ideas for comparison only; do not implement them or require approval of a ranked window before the core identity/question work. See the independent assessment for the UTC/local-date comparison.
+
 ### Independent code finding
 
 The current 0003_leaderboard.sql sums points for daily/weekly windows, uses user_stats.total_score for all-time, compares each user's own local day, and implements weekly as a rolling seven-local-day window. Those are not a common competition period. With extra ad-funded or paid questions, raw totals reward opportunity volume. This finding comes from the real SQL; it is not a completed question-quality audit or a claim based on generated samples.
@@ -103,4 +106,4 @@ This global UTC proposal gives everyone the same 24-hour entry period, not an id
 
 ## Remaining decisions
 
-Age policy; ranked-mode/allowance approval; initial cooldown/technical ceilings; model/audit spend cap; lifetime product economics; domain purchase/provider/data-region setup; native batch approval. Domain and iPhone instructions are in EMAIL_AND_IPHONE_SETUP.md. Build 19 device results are the immediate next gate.
+Identity-isolation repair approval; anonymous/email and recovery/purchase ownership policy; timezone-change rules; initial cooldown/technical ceilings; model/audit spend cap; lifetime product economics; native batch approval. Adults-only is approved; ranked mode and domain purchase are on hold. Build 19's reported startup checks pass, but account isolation blocks external beta. Conditional domain and iPhone instructions remain in EMAIL_AND_IPHONE_SETUP.md.

@@ -1,0 +1,111 @@
+/* Can You Guess? — legal pages. Palette mirrors constants/theme.ts. */
+:root {
+  --bg: #080D1A;
+  --surface: #0F1829;
+  --border: #253047;
+  --primary: #FF6B35;
+  --secondary: #FFC43D;
+  --text: #FFFFFF;
+  --text-secondary: #8A9BB8;
+  --max-width: 46rem;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.wrap {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+header.masthead {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+header.masthead .wrap { padding-block: 1.5rem; }
+
+.brand {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--secondary);
+  text-decoration: none;
+}
+
+h1 {
+  font-size: clamp(1.9rem, 5vw, 2.6rem);
+  line-height: 1.15;
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin: 2.5rem 0 0.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--secondary);
+}
+
+h2:first-of-type { border-top: none; padding-top: 0; margin-top: 2rem; }
+
+.updated {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  margin: 0 0 2rem;
+}
+
+p, li { color: #D8DFEC; }
+
+ul { padding-left: 1.25rem; }
+li { margin-bottom: 0.4rem; }
+
+a { color: var(--primary); }
+a:hover { color: var(--secondary); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.95rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+th { color: var(--text); font-weight: 600; }
+td { color: #D8DFEC; }
+
+.table-scroll { overflow-x: auto; }
+
+footer {
+  border-top: 1px solid var(--border);
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+footer a { margin-right: 1rem; }
+
+@media (prefers-color-scheme: light) {
+  /* The app is dark-only by design (userInterfaceStyle is driven by the
+     app's own palette), so these pages stay dark to match it. */
+}

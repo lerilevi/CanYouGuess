@@ -18,7 +18,6 @@ import { useAuth, useAlert } from '@/template';
 import { getSupabaseClient } from '@/template';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
-import { loginPurchasesUser } from '@/services/purchasesService';
 
 type Mode = 'login' | 'register' | 'otp' | 'forgot' | 'forgot_sent';
 
@@ -51,7 +50,6 @@ export default function LoginScreen() {
       return;
     }
     if (user) {
-      await loginPurchasesUser(user.id);
       router.replace('/(tabs)');
     }
   };
@@ -103,7 +101,6 @@ export default function LoginScreen() {
     setLoading(true);
     const { error, user } = await verifyOTPAndLogin(email.trim(), otp, {
       password,
-      data: { username: username.trim() },
     });
     setLoading(false);
     if (error) {
@@ -111,7 +108,6 @@ export default function LoginScreen() {
       return;
     }
     if (user) {
-      await loginPurchasesUser(user.id);
       // New user — show onboarding slides before home
       router.replace('/onboarding');
     }

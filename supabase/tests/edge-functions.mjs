@@ -95,6 +95,7 @@ if (!runAi) {
 
 const generated = await invokeGenerate({
   action: 'generate',
+  requestId: crypto.randomUUID(),
   category: 'world',
   country: 'World',
   questionTypePreference: 'trivia',

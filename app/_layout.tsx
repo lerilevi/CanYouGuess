@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore, ReactNode } from 'react';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AlertProvider, AuthProvider, useAuth } from '@/template';
 import { GameProvider } from '@/contexts/GameContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { StatusBar } from 'expo-status-bar';
-import { initializePurchases, loginPurchasesUser, logoutPurchasesUser } from '@/services/purchasesService';
+import { getIdentityScope, subscribeIdentity, identityKey } from '@/services/identityScope';
 import { initializeAds } from '@/services/adService';
 import { CrashDiagnosticGate } from '@/components/feature/CrashDiagnosticGate';
 import { RootErrorBoundary } from '@/components/feature/RootErrorBoundary';
@@ -14,7 +14,6 @@ import { RootErrorBoundary } from '@/components/feature/RootErrorBoundary';
 function ServiceInitialization() {
   useEffect(() => {
     const timer = setTimeout(() => {
-      initializePurchases();
       initializeAds();
     }, 0);
     return () => clearTimeout(timer);
@@ -23,31 +22,23 @@ function ServiceInitialization() {
   return null;
 }
 
-/** Syncs RevenueCat identity whenever the auth user changes. */
-function PurchasesSync() {
+/** Key ALL user-owned providers and route-local state, including drafts/modals. */
+function IdentitySession({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-
-  useEffect(() => {
-    if (user?.id) {
-      loginPurchasesUser(user.id);
-    } else {
-      logoutPurchasesUser();
-    }
-  }, [user?.id]);
-
-  return null;
+  const scope = useSyncExternalStore(subscribeIdentity, getIdentityScope, getIdentityScope);
+  if (scope.userId !== (user?.id ?? null)) return null;
+  return <SubscriptionProvider key={identityKey(scope)}>{children}</SubscriptionProvider>;
 }
 
 export default function RootLayout() {
   return (
     <RootErrorBoundary>
       <CrashDiagnosticGate>
-        <AlertProvider>
           <SafeAreaProvider>
             <AuthProvider>
               <ServiceInitialization />
-              <PurchasesSync />
-              <SubscriptionProvider>
+              <IdentitySession>
+                <AlertProvider>
                 <GameProvider>
                   <StatusBar style="light" />
                   <Stack screenOptions={{ headerShown: false }}>
@@ -59,10 +50,10 @@ export default function RootLayout() {
                     <Stack.Screen name="crash-diagnostics-initial-render" />
                   </Stack>
                 </GameProvider>
-              </SubscriptionProvider>
+                </AlertProvider>
+              </IdentitySession>
             </AuthProvider>
           </SafeAreaProvider>
-        </AlertProvider>
       </CrashDiagnosticGate>
     </RootErrorBoundary>
   );

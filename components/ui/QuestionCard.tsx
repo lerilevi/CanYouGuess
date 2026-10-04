@@ -45,6 +45,7 @@ export function QuestionCard({ question, categoryLabel = 'World', categoryColor 
 
       {/* Question text */}
       <Text style={styles.questionText}>{question.question}</Text>
+      {isEstimation ? <Text style={styles.hintText}>Answer in: {question.unit}</Text> : null}
 
       {/* Hint */}
       {question.hint ? (

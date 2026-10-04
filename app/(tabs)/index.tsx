@@ -19,7 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/template';
+import { useAuth, useAlert } from '@/template';
 import { useGame } from '@/hooks/useGame';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { useUserCountry } from '@/hooks/useUserCountry';
@@ -38,6 +38,7 @@ export default function HomeTab() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { showAlert } = useAlert();
   const { isPaid } = useSubscriptionStatus();
   const {
     phase,
@@ -59,6 +60,7 @@ export default function HomeTab() {
     nextQuestion,
     resetGame,
     canPlayToday,
+    playStateKnown,
     isPaidLockedCategory,
     minutesUntilReset,
     clearNewBadges,
@@ -82,6 +84,7 @@ export default function HomeTab() {
   const [selectedChip, setSelectedChip] = useState('random');
   const [answer, setAnswer] = useState('');
   const [showConsent, setShowConsent] = useState(false);
+  const [startAfterConsent, setStartAfterConsent] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallTrigger, setPaywallTrigger] = useState<'category' | 'limit'>('category');
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
@@ -107,6 +110,11 @@ export default function HomeTab() {
   }, [newBadges]);
 
   const openPaywall = (trigger: 'category' | 'limit') => {
+    if (!playStateKnown) {
+      showAlert('Play unavailable', 'Connect to refresh your allowance and access. Please retry.');
+      void loadUserData();
+      return;
+    }
     setPaywallTrigger(trigger);
     setShowPaywall(true);
   };
@@ -134,6 +142,11 @@ export default function HomeTab() {
       router.push('/login');
       return;
     }
+    if (!playStateKnown) {
+      showAlert('Play unavailable', 'Connect to refresh your allowance and access. Please retry.');
+      void loadUserData();
+      return;
+    }
     if (consentGiven === null || consentGiven === false) {
       setShowConsent(true);
       return;
@@ -157,12 +170,15 @@ export default function HomeTab() {
   const handleConsentAccept = () => {
     setConsentGiven(true);
     setShowConsent(false);
-    if (!canPlayToday()) {
-      openPaywall('limit');
-      return;
-    }
-    startNewQuestion(selectedChip, country?.name);
+    setStartAfterConsent(true);
   };
+
+  useEffect(() => {
+    if (startAfterConsent && consentGiven) {
+      setStartAfterConsent(false);
+      handleStartPlaying();
+    }
+  }, [startAfterConsent, consentGiven]);
 
   const handleConsentDecline = () => {
     setShowConsent(false);
@@ -186,7 +202,7 @@ export default function HomeTab() {
   const remainingMinutes = minutesUntilReset();
   const hours = Math.floor(remainingMinutes / 60);
   const mins = remainingMinutes % 60;
-  const questionsLeft = APP_CONFIG.dailyFreeQuestions - questionsToday;
+  const questionsLeft = Math.max(0, APP_CONFIG.dailyFreeQuestions - questionsToday);
   const bonusAvailable = canEarnMoreBonusQuestions();
 
   return (
@@ -461,7 +477,7 @@ export default function HomeTab() {
                     onChangeText={setAnswer}
                     keyboardType={currentQuestion.type === 'estimation' ? 'numeric' : 'default'}
                     returnKeyType="done"
-                    editable={phase !== 'evaluating'}
+                    editable
                     multiline={currentQuestion.type === 'trivia'}
                     numberOfLines={currentQuestion.type === 'trivia' ? 2 : 1}
                     accessibilityLabel="Your answer"

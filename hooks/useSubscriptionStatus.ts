@@ -6,6 +6,7 @@ export function useSubscriptionStatus() {
   return {
     isPaid: ctx.isPaid,
     isLoading: ctx.isLoading,
+    status: ctx.status,
     refreshPurchase: ctx.refreshPurchase,
     // Legacy alias kept for any remaining callsites
     isSubscribed: ctx.isPaid,

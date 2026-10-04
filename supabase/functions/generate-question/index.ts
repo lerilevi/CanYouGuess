@@ -2,25 +2,9 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { corsHeaders } from '../_shared/cors.ts';
-
-const SYSTEM_PROMPT = `You are a trivia/estimation game engine for "Can You Guess?". Generate fun questions and evaluate answers.
-Types: ESTIMATION (Fermi-style numeric guesses) and TRIVIA (factual, one correct answer).
-Rules: English only, match category, no offensive content, brief explanations.
-QUESTION LENGTH: MUST be 8-14 words maximum. Short, punchy, direct. No lengthy preambles.
-Respond with valid JSON only — no markdown, no extra text.`;
-
-const TOPIC_WHEEL = [
-  'ancient civilizations', 'space exploration', 'deep ocean life', 'human anatomy', 'bizarre world records',
-  'food science and nutrition', 'famous inventors', 'extreme weather events', 'animal migration patterns', 'architectural wonders',
-  'music history', 'olympic sports records', 'endangered species', 'viral diseases and vaccines', 'chemical elements and reactions',
-  'economic history', 'film and cinema history', 'mountain ranges and peaks', 'rivers and lakes', 'famous wars and battles',
-  'plant biology and botany', 'renewable energy sources', 'language and linguistics', 'chess and strategy games', 'famous artworks and artists',
-  'volcanoes and earthquakes', 'aviation and flight history', 'famous scientists and discoveries', 'currency and trade history', 'mythology and legends',
-  'genetics and DNA', 'bridges and engineering marvels', 'street food around the world', 'famous athletes and sports achievements', 'typography and writing systems',
-  'medieval history and knights', 'fishing and aquaculture', 'famous libraries and books', 'psychology and human behavior', 'astronomy and planetary science',
-  'amphibians reptiles and cold-blooded animals', 'fermentation wine and brewing', 'transportation and vehicle history', 'famous explorers and expeditions', 'martial arts and combat sports',
-  'nanotechnology and materials science', 'insects and arachnids', 'famous speeches and rhetoric', 'cryptography and codes', 'traditional clothing and fashion history',
-];
+import { evaluateFrozen, RUBRIC_VERSION } from '../_shared/estimation.ts';
+import { normalizeAnswer, containsNormalizedPhrase, matchesAcceptedAnswer } from '../_shared/trivia.ts';
+import { SYSTEM_PROMPT, QUESTION_SCHEMA, generatePrompt } from '../_shared/questionPrompt.ts';
 
 const ALLOWED_CATEGORIES = new Set([
   'my_country', 'world', 'science', 'history', 'food_drink', 'sports', 'art',
@@ -39,30 +23,6 @@ const REQUEST_TIMEOUT_MS = Number.isFinite(configuredTimeout)
 const MAX_PROVIDER_ATTEMPTS = 3;
 const PROVIDER_RETRY_BASE_DELAY_MS = 500;
 const MAX_REQUEST_BYTES = 16_384;
-
-const QUESTION_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    type: { type: 'string', enum: ['trivia', 'estimation'] },
-    question: { type: 'string' },
-    hint: { type: 'string' },
-    correctAnswer: { type: 'string' },
-    acceptableAnswers: { type: 'array', items: { type: 'string' }, maxItems: 6 },
-  },
-  required: ['type', 'question', 'hint', 'correctAnswer', 'acceptableAnswers'],
-};
-
-const ESTIMATION_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    estimatedAnswer: { type: 'number' },
-    unit: { type: 'string' },
-    steps: { type: 'array', items: { type: 'string' }, maxItems: 5 },
-  },
-  required: ['estimatedAnswer', 'unit', 'steps'],
-};
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -133,109 +93,6 @@ async function readJsonBody(req: Request): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
-function normalizeAnswer(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLocaleLowerCase('en')
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-function containsNormalizedPhrase(text: string, phrase: string): boolean {
-  const normalizedText = normalizeAnswer(text);
-  const normalizedPhrase = normalizeAnswer(phrase);
-  return Boolean(normalizedPhrase)
-    && ` ${normalizedText} `.includes(` ${normalizedPhrase} `);
-}
-
-function editDistance(left: string, right: string): number {
-  if (left === right) return 0;
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= left.length; i += 1) {
-    const current = [i];
-    for (let j = 1; j <= right.length; j += 1) {
-      current[j] = Math.min(
-        current[j - 1] + 1,
-        previous[j] + 1,
-        previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1),
-      );
-    }
-    previous.splice(0, previous.length, ...current);
-  }
-  return previous[right.length];
-}
-
-function matchesAcceptedAnswer(userAnswer: string, acceptedAnswers: string[]): boolean {
-  const candidate = normalizeAnswer(userAnswer);
-  return acceptedAnswers.some((answer) => {
-    const expected = normalizeAnswer(answer);
-    if (!candidate || !expected) return false;
-    if (candidate === expected) return true;
-    const tolerance = expected.length >= 12 ? 2 : expected.length >= 6 ? 1 : 0;
-    return Math.abs(candidate.length - expected.length) <= tolerance
-      && editDistance(candidate, expected) <= tolerance;
-  });
-}
-
-function generatePrompt(
-  category: string,
-  country: string,
-  seed: string,
-  questionTypePreference: string,
-  recentTopics: string[],
-): string {
-  const seedNum = seed.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const typeInstruction = questionTypePreference === 'estimation'
-    ? 'MUST be ESTIMATION (a numeric Fermi-style guess). Not trivia.'
-    : questionTypePreference === 'trivia'
-    ? 'MUST be TRIVIA (one clear factual answer). Not estimation.'
-    : `Seed sum is ${seedNum % 2 === 0 ? 'even → use estimation' : 'odd → use trivia'}.`;
-  const forcedTheme = TOPIC_WHEEL[seedNum % TOPIC_WHEEL.length];
-  const isCountry = category === 'my_country';
-  const resolvedCountry = country !== 'World' && country !== 'Unknown' ? country : null;
-  const locationRule = isCountry && resolvedCountry
-    ? `CATEGORY: "My Country" = ${resolvedCountry}. The question MUST name and concern ${resolvedCountry}.`
-    : isCountry
-    ? 'CATEGORY: "My Country" (country unknown). Generate a country-themed question.'
-    : `CATEGORY: "${category}". General world knowledge only.`;
-  const theme = !isCountry || !resolvedCountry
-    ? `THEME (MANDATORY): Relate clearly to "${forcedTheme}".`
-    : '';
-  const recent = recentTopics.length
-    ? `BANNED TOPICS: ${recentTopics.join(' | ')}.`
-    : '';
-
-  return `Generate ONE question. Seed: ${seed}
-${recent}
-${theme}
-${locationRule}
-Type: ${typeInstruction}
-LENGTH: Question MUST be 8-14 words. Count words.
-Avoid clichés such as the Mona Lisa, capital cities, speed of light, and the Great Wall.
-JSON only:
-{"type":"estimation"or"trivia","question":"...","hint":"max 8 words or empty","correctAnswer":"primary trivia answer or empty","acceptableAnswers":["primary answer","up to 5 factual aliases"]}`;
-}
-
-function estimationPrompt(question: string, userAnswer: number): string {
-  return `Q: "${question}"
-User estimate: ${userAnswer}
-Determine the best-supported numeric answer. JSON only:
-{"estimatedAnswer":<number>,"unit":"<unit>","steps":["<step1>","<step2>","<step3>"]}`;
-}
-
-function scoreFromDeviation(deviation: number): number {
-  if (deviation <= 0) return 100;
-  if (deviation <= 1) return Math.round(100 - deviation);
-  if (deviation <= 5) return Math.round(99 - (deviation - 1) * 2.25);
-  if (deviation <= 20) return Math.round(90 - (deviation - 5) * (20 / 15));
-  if (deviation <= 50) return Math.round(70 - (deviation - 20));
-  if (deviation <= 100) return Math.round(40 - (deviation - 50) * 0.4);
-  return Math.max(0, Math.round(20 - Math.min(deviation - 100, 100) * 0.2));
-}
-
 function verdictForScore(score: number): string {
   if (score >= 95) return 'Spot On!';
   if (score >= 70) return 'Pretty Close!';
@@ -254,6 +111,8 @@ Deno.serve(async (req: Request) => {
 
   let activeClaim: { userId: string; sessionId: string; token: string } | null = null;
   let releaseActiveClaim: (() => Promise<void>) | null = null;
+  let playReservation: string | null = null;
+  let releasePlay: (() => Promise<void>) | null = null;
 
   try {
     const authHeader = req.headers.get('Authorization');
@@ -331,6 +190,7 @@ Deno.serve(async (req: Request) => {
           temperature,
           responseMimeType: 'application/json',
           responseJsonSchema,
+          maxOutputTokens: 4096,
           thinkingConfig: { thinkingLevel: THINKING_LEVEL },
         },
       });
@@ -380,6 +240,7 @@ Deno.serve(async (req: Request) => {
           throw new Error('AI provider returned no complete candidate');
         }
         const text = (candidate.content?.parts ?? [])
+          .filter((part: {thought?:boolean}) => !part.thought)
           .map((part: { text?: string }) => part.text ?? '')
           .join('');
         if (!text.trim()) throw new Error('AI provider returned an empty response');
@@ -388,6 +249,34 @@ Deno.serve(async (req: Request) => {
 
       throw new HttpError(503, 'AI provider temporarily unavailable');
     };
+
+    const verifyPurchase = async () => {
+      const secret = Deno.env.get('REVENUECAT_SECRET_KEY');
+      const entitlement = Deno.env.get('REVENUECAT_ENTITLEMENT_ID');
+      let active = false;
+      if (secret && entitlement) {
+        const response = await fetch('https://api.revenuecat.com/v1/subscribers/'+encodeURIComponent(user.id), {
+          headers: {Authorization: 'Bearer '+secret}, signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) throw new HttpError(503,'Purchase verification temporarily unavailable');
+        const payload = await response.json();
+        const e = payload.subscriber?.entitlements?.[entitlement];
+        const allowSandbox = Deno.env.get('ALLOW_SANDBOX_PURCHASES') === 'true';
+        const product = payload.subscriber?.non_subscriptions?.[e?.product_identifier];
+        const subscriptions = payload.subscriber?.subscriptions?.[e?.product_identifier];
+        const sandbox = subscriptions?.is_sandbox ?? product?.[product.length-1]?.is_sandbox;
+        active = Boolean(e && (!e.expires_date || Date.parse(e.expires_date)>Date.now())
+          && (allowSandbox || sandbox === false));
+      }
+      const {error} = await adminClient.rpc('set_verified_purchase',{p_uid:user.id,p_active:active});
+      if (error) throw new Error('Purchase state could not be synchronized');
+    };
+    if (action === 'play_state') {
+      await verifyPurchase();
+      const {data,error} = await userClient.rpc('get_my_play_state');
+      if (error) throw new Error('Play state unavailable');
+      return json(data);
+    }
 
     if (action === 'generate') {
       const category = boundedString(input.category ?? 'world', 'category', 32);
@@ -402,6 +291,23 @@ Deno.serve(async (req: Request) => {
         ? input.recentTopics.slice(0, 10).map((topic, index) => boundedString(topic, `recentTopics[${index}]`, 100))
         : [];
 
+      const requestId = boundedString(input.requestId,'requestId',64);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))
+        throw new HttpError(400,'Invalid requestId');
+      await verifyPurchase();
+      const {data:reservation,error:reservationError} = await adminClient.rpc('reserve_play', {
+        p_uid:user.id,p_request:requestId,p_category:category,
+      });
+      if (reservationError) {
+        if (reservationError.code === '55P03') throw new HttpError(409,'Question request already used or in progress');
+        if (reservationError.code === '42501') throw new HttpError(403,'Premium category locked');
+        if (reservationError.message.includes('allowance')) throw new HttpError(429,'Daily allowance exhausted');
+        throw new Error('Play reservation failed');
+      }
+      if (reservation?.replay) return json(reservation);
+      playReservation=reservation?.reservationId;
+      if (!playReservation) throw new Error('Reservation id missing');
+      releasePlay=async () => { if (playReservation) await adminClient.rpc('release_play',{p_uid:user.id,p_reservation:playReservation}); };
       await reserve('generate');
       const seed = `${Date.now()}-${crypto.randomUUID()}`;
       const generated = await callGemini(
@@ -445,21 +351,20 @@ Deno.serve(async (req: Request) => {
           hint = '';
         }
       }
-      const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
-      const { data: questionId, error: sessionError } = await adminClient.rpc('create_question_session', {
-        p_user_id: user.id,
-        p_category: category,
-        p_question_type: type,
-        p_question: question,
-        p_correct_answer: correctAnswer,
-        p_acceptable_answers: acceptableAnswers,
-        p_expires_at: expiresAt,
+      const referenceAnswer = type === 'estimation' ? Number(generated.referenceAnswer) : null;
+      const unit = type === 'estimation' ? boundedString(generated.unit,'unit',80) : '';
+      const steps = type === 'estimation' && Array.isArray(generated.steps)
+        ? generated.steps.slice(0,5).map((s,i) => boundedString(s,`steps[${i}]`,240)) : [];
+      if (type === 'estimation' && (!Number.isFinite(referenceAnswer) || referenceAnswer! <= 0 || steps.length<2))
+        throw new Error('Missing valid frozen estimation reference');
+      const expiresAt = new Date(Date.now()+15*60_000).toISOString();
+      const {data:questionId,error:sessionError} = await adminClient.rpc('create_reserved_question',{
+        p_uid:user.id,p_reservation:playReservation,
+        p_payload:{type,question,hint,correctAnswer,acceptableAnswers,referenceAnswer,unit,steps,rubricVersion:RUBRIC_VERSION},
       });
-      if (sessionError || typeof questionId !== 'string') {
-        throw new Error(`Could not create question session: ${sessionError?.message ?? 'no id returned'}`);
-      }
-
-      return json({ questionId, type, question, hint, expiresAt });
+      if (sessionError || typeof questionId !== 'string') throw new Error('Question session could not be committed');
+      playReservation=null;
+      return json({questionId,type,question,hint,unit,expiresAt});
     }
 
     if (action === 'evaluate_estimation' || action === 'evaluate_trivia') {
@@ -511,21 +416,15 @@ Deno.serve(async (req: Request) => {
       let deviation: number | null = null;
 
       if (questionSession.question_type === 'estimation') {
-        await reserve('evaluate');
-        const userAnswer = estimationAnswer as number;
-        const evaluated = await callGemini(
-          estimationPrompt(questionSession.question, userAnswer),
-          ESTIMATION_SCHEMA,
-          0.2,
-        );
-        const estimatedAnswer = Number(evaluated.estimatedAnswer);
-        if (!Number.isFinite(estimatedAnswer)) throw new Error('Gemini returned an invalid estimated answer');
-        deviation = Math.abs(userAnswer - estimatedAnswer) / Math.max(Math.abs(estimatedAnswer), 1) * 100;
-        score = scoreFromDeviation(deviation);
-        const unit = boundedString(evaluated.unit ?? '', 'unit', 80, true);
-        const steps = Array.isArray(evaluated.steps)
-          ? evaluated.steps.slice(0, 5).map((step, index) => boundedString(step, `steps[${index}]`, 240))
-          : [];
+        const {data:frozen,error:frozenError} = await adminClient.rpc('get_frozen_reference',{
+          p_uid:user.id,p_session:questionSession.id,p_token:questionSession.evaluation_token,
+        });
+        if (frozenError || frozen?.rubricVersion !== RUBRIC_VERSION) throw new Error('Frozen reference unavailable');
+        const estimatedAnswer = Number(frozen.referenceAnswer);
+        const evaluated = evaluateFrozen(estimatedAnswer,estimationAnswer as number);
+        deviation=evaluated.deviationPercent; score=evaluated.score;
+        const unit = boundedString(frozen.unit,'unit',80);
+        const steps = Array.isArray(frozen.steps) ? frozen.steps : [];
         result = {
           estimatedAnswer,
           unit,
@@ -571,6 +470,7 @@ Deno.serve(async (req: Request) => {
     throw new HttpError(400, 'Unknown action');
   } catch (error) {
     if (releaseActiveClaim) await releaseActiveClaim();
+    if (releasePlay) await releasePlay();
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
     if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body' }, 400);
     console.error('[generate-question] Unexpected error:', error);

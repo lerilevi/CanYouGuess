@@ -13,6 +13,7 @@
  */
 
 import { APP_CONFIG } from '@/constants/config';
+import { assertCurrentIdentity, captureIdentity, getIdentityScope, IdentityScope, StaleIdentityError } from './identityScope';
 
 // ─── Lazy native module access ────────────────────────────────────────────────
 
@@ -38,72 +39,91 @@ function getNativePurchases(): PurchasesModule | null {
 // ─── Initialisation ──────────────────────────────────────────────────────────
 
 let _initialized = false;
+let _initializing: Promise<void> | null = null;
+let _sdkUserId: string | null = null;
+let _queue: Promise<unknown> = Promise.resolve();
 
-export const initializePurchases = async (): Promise<void> => {
+function ordered<T>(operation: () => Promise<T>): Promise<T> {
+  const result = _queue.catch(() => {}).then(operation);
+  _queue = result;
+  return result;
+}
+
+export const initializePurchases = async (userId?: string): Promise<void> => {
   if (_initialized) return;
+  if (_initializing) return _initializing;
+  const owner = userId ?? getIdentityScope().userId;
+  if (!owner) throw new Error('Sign in before initializing purchases.');
   const mod = getNativePurchases();
   if (!mod) {
-    console.warn('[Purchases] react-native-purchases native module not available.');
-    return;
+    throw new Error('Purchases are unavailable on this device.');
   }
-  try {
+  _initializing = (async () => {
     const apiKey = APP_CONFIG.revenueCatKey;
     if (!apiKey) {
-      console.warn('[Purchases] EXPO_PUBLIC_REVENUECAT_PUBLIC_SDK_KEY is not set.');
-      return;
+      throw new Error('Purchase configuration is missing.');
     }
     mod.default.setLogLevel(mod.LOG_LEVEL.ERROR);
-    await mod.default.configure({ apiKey });
+    await mod.default.configure({ apiKey, appUserID: owner });
+    _sdkUserId = owner;
     _initialized = true;
-  } catch (err) {
-    console.error('[Purchases] initializePurchases failed:', err);
-  }
+  })();
+  try { await _initializing; } finally { _initializing = null; }
 };
 
 // ─── Identity ────────────────────────────────────────────────────────────────
 
-export const loginPurchasesUser = async (userId: string): Promise<void> => {
+async function ensureIdentity(scope: IdentityScope): Promise<PurchasesModule> {
+  assertCurrentIdentity(scope);
+  await initializePurchases(scope.userId!);
+  assertCurrentIdentity(scope);
   const mod = getNativePurchases();
-  try {
-    if (!_initialized || !mod) return;
-    await mod.default.logIn(userId);
-  } catch (err) {
-    console.error('[Purchases] loginPurchasesUser failed:', err);
+  if (!mod) throw new Error('Purchases unavailable.');
+  if (_sdkUserId !== scope.userId) {
+    await mod.default.logIn(scope.userId!);
+    _sdkUserId = scope.userId;
   }
+  assertCurrentIdentity(scope);
+  if (await mod.default.getAppUserID() !== scope.userId) throw new Error('Purchase identity is not synchronized.');
+  assertCurrentIdentity(scope);
+  return mod;
+}
+
+export const loginPurchasesUser = async (userId: string): Promise<void> => {
+  const scope = captureIdentity(userId);
+  await ordered(async () => { await ensureIdentity(scope); });
 };
 
 export const logoutPurchasesUser = async (): Promise<void> => {
-  const mod = getNativePurchases();
-  try {
-    if (!_initialized || !mod) return;
+  const scope = getIdentityScope();
+  if (scope.userId) throw new Error('Auth must leave the player before purchase logout.');
+  await ordered(async () => {
+    if (getIdentityScope() !== scope) return; // B already arrived: logIn B, not another anonymous identity.
+    const mod = getNativePurchases();
+    if (_initializing) await _initializing;
+    if (!_initialized || !mod || _sdkUserId === null) return;
     await mod.default.logOut();
-  } catch (err) {
-    console.error('[Purchases] logoutPurchasesUser failed:', err);
-  }
+    _sdkUserId = null;
+  });
 };
 
 // ─── Customer info ───────────────────────────────────────────────────────────
 
 export const getCustomerInfo = async (): Promise<import('react-native-purchases').CustomerInfo | null> => {
-  const mod = getNativePurchases();
-  try {
-    if (!_initialized || !mod) return null;
-    return await mod.default.getCustomerInfo();
-  } catch (err) {
-    console.error('[Purchases] getCustomerInfo failed:', err);
-    return null;
-  }
+  const scope = captureIdentity();
+  return ordered(async () => {
+    const mod = await ensureIdentity(scope);
+    const info = await mod.default.getCustomerInfo();
+    assertCurrentIdentity(scope);
+    return info;
+  });
 };
 
-export const checkIsSubscribed = async (): Promise<boolean> => {
-  try {
+export const checkIsSubscribed = async (): Promise<boolean | null> => {
     const info = await getCustomerInfo();
-    if (!info) return false;
+    if (!info) return null;
     const entitlement = info.entitlements.active[APP_CONFIG.premiumEntitlementId];
     return !!entitlement;
-  } catch {
-    return false;
-  }
 };
 
 // ─── Offerings ───────────────────────────────────────────────────────────────
@@ -111,14 +131,16 @@ export const checkIsSubscribed = async (): Promise<boolean> => {
 export const getOfferings = async (): Promise<{
   current: { availablePackages: import('react-native-purchases').PurchasesPackage[] };
 } | null> => {
-  const mod = getNativePurchases();
   try {
-    if (!_initialized || !mod) return null;
-    const offerings = await mod.default.getOfferings();
-    if (!offerings.current) return null;
-    return { current: { availablePackages: offerings.current.availablePackages } };
+    const scope = captureIdentity();
+    return await ordered(async () => {
+      const mod = await ensureIdentity(scope);
+      const offerings = await mod.default.getOfferings();
+      assertCurrentIdentity(scope);
+      return offerings.current ? { current: { availablePackages: offerings.current.availablePackages } } : null;
+    });
   } catch (err) {
-    console.error('[Purchases] getOfferings failed:', err);
+    if (!(err instanceof StaleIdentityError)) console.warn('[Purchases] Offerings unavailable.');
     return null;
   }
 };
@@ -128,17 +150,15 @@ export const getOfferings = async (): Promise<{
 export const purchasePackage = async (
   packageToPurchase: unknown
 ): Promise<{ success: boolean; error?: string }> => {
-  const mod = getNativePurchases();
   try {
-    if (!_initialized || !mod) return { success: false, error: 'Purchases not initialized' };
-    const { customerInfo } = await mod.default.purchasePackage(
-      packageToPurchase as import('react-native-purchases').PurchasesPackage
-    );
-    const active = customerInfo.entitlements.active[APP_CONFIG.premiumEntitlementId];
-    if (active) {
-      return { success: true };
-    }
-    return { success: false, error: 'Purchase completed but entitlement not found.' };
+    const scope = captureIdentity();
+    return await ordered(async () => {
+      const mod = await ensureIdentity(scope);
+      const { customerInfo } = await mod.default.purchasePackage(packageToPurchase as import('react-native-purchases').PurchasesPackage);
+      assertCurrentIdentity(scope);
+      return customerInfo.entitlements.active[APP_CONFIG.premiumEntitlementId]
+        ? { success: true } : { success: false, error: 'Purchase completed but entitlement not found.' };
+    });
   } catch (err: unknown) {
     const e = err as { userCancelled?: boolean; message?: string };
     if (e.userCancelled) return { success: false, error: 'cancelled' };
@@ -153,12 +173,14 @@ export const restorePurchases = async (): Promise<{
   isSubscribed: boolean;
   error?: string;
 }> => {
-  const mod = getNativePurchases();
   try {
-    if (!_initialized || !mod) return { success: false, isSubscribed: false, error: 'Purchases not initialized' };
-    const customerInfo = await mod.default.restorePurchases();
-    const active = customerInfo.entitlements.active[APP_CONFIG.premiumEntitlementId];
-    return { success: true, isSubscribed: !!active };
+    const scope = captureIdentity();
+    return await ordered(async () => {
+      const mod = await ensureIdentity(scope);
+      const customerInfo = await mod.default.restorePurchases();
+      assertCurrentIdentity(scope);
+      return { success: true, isSubscribed: !!customerInfo.entitlements.active[APP_CONFIG.premiumEntitlementId] };
+    });
   } catch (err: unknown) {
     const e = err as { message?: string };
     return { success: false, isSubscribed: false, error: e.message ?? 'Restore failed' };

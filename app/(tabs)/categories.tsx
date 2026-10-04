@@ -12,13 +12,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useAuth } from '@/template';
+import { useAuth, useAlert } from '@/template';
 import { useGame } from '@/hooks/useGame';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { useUserCountry } from '@/hooks/useUserCountry';
 import { CategoryCard } from '@/components/ui/CategoryCard';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { PaywallScreen } from '@/components/feature/PaywallScreen';
+import { ConsentModal } from '@/components/feature/ConsentModal';
 import { CATEGORIES } from '@/constants/config';
 import { getCategoryScores, CategoryScore } from '@/services/profileService';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme';
@@ -27,9 +28,13 @@ export default function CategoriesTab() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { showAlert } = useAlert();
   const { isPaid } = useSubscriptionStatus();
   const {
     startNewQuestion,
+    canPlayToday,
+    playStateKnown,
+    loadUserData,
     consentGiven,
     setConsentGiven,
     isPaidLockedCategory,
@@ -39,6 +44,7 @@ export default function CategoriesTab() {
 
   const [categoryScores, setCategoryScores] = useState<CategoryScore[]>([]);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [pendingCategory, setPendingCategory] = useState<string | null>(null);
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
   const { country, loading: countryLoading, permissionDenied, requestCountry } = useUserCountry();
 
@@ -57,10 +63,22 @@ export default function CategoriesTab() {
   });
 
   useEffect(() => {
+    let active = true;
+    setCategoryScores([]);
     if (user) {
-      getCategoryScores(user.id).then(setCategoryScores);
+      getCategoryScores(user.id).then(rows => { if (active) setCategoryScores(rows); }).catch(() => {});
     }
+    return () => { active = false; };
   }, [user]);
+
+  useEffect(() => {
+    if (consentGiven && pendingCategory) {
+      const category = pendingCategory;
+      setPendingCategory(null);
+      void startNewQuestion(category, country?.name);
+      router.push('/(tabs)');
+    }
+  }, [consentGiven, pendingCategory, startNewQuestion, country?.name, router]);
 
   const getHighestScore = (categoryId: string): number | undefined => {
     const cs = categoryScores.find((s) => s.category === categoryId);
@@ -68,12 +86,18 @@ export default function CategoriesTab() {
   };
 
   const handleCategoryPress = (categoryId: string) => {
-    if (isPaidLockedCategory(categoryId)) {
+    if (!playStateKnown) {
+      showAlert('Play unavailable', 'Connect to refresh your allowance and access. Please retry.');
+      void loadUserData();
+      return;
+    }
+    if (isPaidLockedCategory(categoryId) || !canPlayToday()) {
       setShowPaywall(true);
       return;
     }
     if (!consentGiven) {
-      setConsentGiven(true);
+      setPendingCategory(categoryId);
+      return;
     }
     startNewQuestion(categoryId, country?.name);
     router.push('/(tabs)');
@@ -229,6 +253,9 @@ export default function CategoriesTab() {
       </ScrollView>
 
       {/* Paywall — one-time purchase */}
+      <ConsentModal visible={pendingCategory !== null}
+        onDecline={() => setPendingCategory(null)}
+        onAccept={() => setConsentGiven(true)} />
       <PaywallScreen
         visible={showPaywall}
         onClose={() => setShowPaywall(false)}

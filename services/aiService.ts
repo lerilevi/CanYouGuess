@@ -1,140 +1,51 @@
-import { getSupabaseClient } from '@/template';
-import { FunctionsHttpError } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
+import { captureIdentity, assertCurrentIdentity, IdentityScope } from './identityScope';
+import { readUserCache, updateUserCache } from './userCache';
+import { ownedRequest } from './ownedBackend';
 
 export interface GeneratedQuestion {
-  type: 'estimation' | 'trivia';
-  question: string;
-  hint: string;
-  correctAnswer?: string;
+  questionId: string; type: 'estimation' | 'trivia'; question: string;
+  hint: string; unit: string; expiresAt: string;
 }
-
+export interface ServerScoreStats { new_badges?: string[] }
 export interface EstimationResult {
-  estimatedAnswer: number;
-  unit: string;
-  steps: string[];
-  deviationPercent: number;
-  score: number;
-  verdict: string;
+  estimatedAnswer: number; unit: string; steps: string[]; deviationPercent: number;
+  score: number; verdict: string; stats?: ServerScoreStats;
 }
-
 export interface TriviaResult {
-  isCorrect: boolean;
-  correctAnswer: string;
-  explanation: string;
-  score: number;
-  verdict: string;
+  isCorrect: boolean; correctAnswer: string; explanation: string; score: number;
+  verdict: string; stats?: ServerScoreStats;
 }
-
-// ─── Recent question history ────────────────────────────────────────────────
-// Store last 15 question texts per category key so the AI avoids repetition.
-
-const HISTORY_KEY = '@canyouguess_question_history_v1';
-const MAX_HISTORY = 15;
-
-type HistoryMap = Record<string, string[]>;
-
-async function loadHistory(): Promise<HistoryMap> {
-  try {
-    const raw = await AsyncStorage.getItem(HISTORY_KEY);
-    return raw ? (JSON.parse(raw) as HistoryMap) : {};
-  } catch {
-    return {};
+export interface PlayState {
+  questions_today: number; free_limit: number; bonus_remaining: number;
+  paid: boolean; can_play: boolean; reset_at: string; server_now: string;
+  local_date: string; timezone: string; rewards_available: boolean;
+}
+type History = Record<string, string[]>;
+export async function getPlayState(scope = captureIdentity()): Promise<PlayState> {
+  const rows = await ownedRequest<PlayState[]>('/functions/v1/generate-question',
+    {method:'POST',body:JSON.stringify({action:'play_state'})},scope);
+  if (!rows?.[0]?.server_now) throw new Error('The authoritative play contract is not deployed.');
+  return rows[0];
+}
+export async function generateQuestion(category: string, country: string, preference: 'estimation'|'trivia'|'mix' = 'mix', scope = captureIdentity()): Promise<GeneratedQuestion> {
+  const history = await readUserCache<History>(scope, 'question-history') ?? {};
+  const data = await ownedRequest<GeneratedQuestion>('/functions/v1/generate-question', {
+    method: 'POST', body: JSON.stringify({ action: 'generate', requestId: Crypto.randomUUID(),
+      category, country, questionTypePreference: preference, recentTopics: history[category] ?? [] }),
+  }, scope);
+  if (!data.questionId || !data.question || !data.expiresAt || typeof data.unit !== 'string') {
+    throw new Error('Question contract mismatch. Play is paused; no legacy scoring fallback is allowed.');
   }
-}
-
-async function saveHistory(map: HistoryMap): Promise<void> {
-  try {
-    await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(map));
-  } catch {
-    // ignore
-  }
-}
-
-async function getRecentTopics(category: string): Promise<string[]> {
-  const map = await loadHistory();
-  return map[category] ?? [];
-}
-
-async function recordQuestion(category: string, question: string): Promise<void> {
-  const map = await loadHistory();
-  const existing = map[category] ?? [];
-  // Keep most recent MAX_HISTORY entries
-  map[category] = [question, ...existing].slice(0, MAX_HISTORY);
-  await saveHistory(map);
-}
-
-// ─── Shared fetch helper ─────────────────────────────────────────────────────
-
-const invokeWithErrorParsing = async (fnName: string, body: Record<string, unknown>) => {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.functions.invoke(fnName, { body });
-  if (error) {
-    let message = error.message;
-    if (error instanceof FunctionsHttpError) {
-      try {
-        const statusCode = error.context?.status ?? 500;
-        const text = await error.context?.text();
-        message = `[${statusCode}] ${text || error.message}`;
-      } catch {
-        message = error.message;
-      }
-    }
-    throw new Error(message);
-  }
+  await updateUserCache<History>(scope, 'question-history', previous => ({
+    ...(previous ?? {}), [category]: [data.question, ...(previous?.[category] ?? [])].slice(0, 15),
+  })).catch(() => { assertCurrentIdentity(scope); });
+  assertCurrentIdentity(scope);
   return data;
-};
-
-// ─── Public API ──────────────────────────────────────────────────────────────
-
-export const generateQuestion = async (
-  category: string,
-  country: string,
-  questionTypePreference: 'estimation' | 'trivia' | 'mix' = 'mix'
-): Promise<GeneratedQuestion> => {
-  // Load recent questions so the AI knows what to avoid
-  const recentTopics = await getRecentTopics(category);
-
-  const data = await invokeWithErrorParsing('generate-question', {
-    action: 'generate',
-    category,
-    country,
-    questionTypePreference,
-    recentTopics,
-  });
-
-  const question = data as GeneratedQuestion;
-
-  // Record this question text to prevent near-future repetition
-  if (question?.question) {
-    await recordQuestion(category, question.question);
-  }
-
-  return question;
-};
-
-export const evaluateEstimation = async (
-  question: string,
-  userAnswer: number
-): Promise<EstimationResult> => {
-  const data = await invokeWithErrorParsing('generate-question', {
-    action: 'evaluate_estimation',
-    question,
-    userAnswer,
-  });
-  return data as EstimationResult;
-};
-
-export const evaluateTrivia = async (
-  question: string,
-  correctAnswer: string,
-  userAnswer: string
-): Promise<TriviaResult> => {
-  const data = await invokeWithErrorParsing('generate-question', {
-    action: 'evaluate_trivia',
-    question,
-    correctAnswer,
-    userAnswer,
-  });
-  return data as TriviaResult;
-};
+}
+export const evaluateEstimation = (questionId: string, userAnswer: number, scope?: IdentityScope) =>
+  ownedRequest<EstimationResult>('/functions/v1/generate-question', { method: 'POST',
+    body: JSON.stringify({ action: 'evaluate_estimation', questionId, userAnswer }) }, scope);
+export const evaluateTrivia = (questionId: string, userAnswer: string, scope?: IdentityScope) =>
+  ownedRequest<TriviaResult>('/functions/v1/generate-question', { method: 'POST',
+    body: JSON.stringify({ action: 'evaluate_trivia', questionId, userAnswer }) }, scope);

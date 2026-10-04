@@ -34,7 +34,8 @@ select ok(
      where n.nspname = 'public'
        and c.relname in (
          'user_profiles', 'user_stats', 'score_events', 'user_badges',
-         'category_scores', 'question_sessions', 'ai_request_events'
+         'category_scores', 'question_sessions', 'ai_request_events',
+         'play_config', 'play_accounts', 'play_reservations', 'reward_credits'
        )
        and (not c.relrowsecurity or not c.relforcerowsecurity)
   ),
@@ -82,6 +83,15 @@ select ok(
 select ok(
   not has_table_privilege('service_role', 'public.question_sessions', 'SELECT'),
   'service role reaches private question state only through the RPC allowlist'
+);
+select ok(
+  not has_function_privilege('service_role', 'public.create_question_session(uuid,text,text,text,text,text[],timestamptz)', 'EXECUTE'),
+  'older unreserved question route is closed'
+);
+select ok(
+  has_function_privilege('service_role', 'public.reserve_play(uuid,uuid,text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.reserve_play(uuid,uuid,text)', 'EXECUTE'),
+  'only the Edge gateway can reserve play'
 );
 
 select is((select count(*) from public.user_profiles), 2::bigint, 'auth trigger creates both profiles');
@@ -156,16 +166,19 @@ select lives_ok(
     do $block$
     declare
       v_session uuid;
+      v_reservation jsonb;
     begin
-      select public.create_question_session(
-        '11111111-1111-4111-8111-111111111111', 'world', 'trivia',
-        'Which element has the chemical symbol Au in science?', 'Gold', array['Gold', 'Au']
+      v_reservation := public.reserve_play('11111111-1111-4111-8111-111111111111', gen_random_uuid(), 'world');
+      select public.create_reserved_question(
+        '11111111-1111-4111-8111-111111111111', (v_reservation->>'reservationId')::uuid,
+        '{"type":"trivia","question":"Which element has the chemical symbol Au in science?","correctAnswer":"Gold","acceptableAnswers":["Gold","Au"],"steps":[]}'::jsonb
       ) into v_session;
       perform set_config('test.user_a_session', v_session::text, true);
 
-      select public.create_question_session(
-        '22222222-2222-4222-8222-222222222222', 'world', 'trivia',
-        'Which planet is famous for its visible rings?', 'Saturn', array['Saturn']
+      v_reservation := public.reserve_play('22222222-2222-4222-8222-222222222222', gen_random_uuid(), 'world');
+      select public.create_reserved_question(
+        '22222222-2222-4222-8222-222222222222', (v_reservation->>'reservationId')::uuid,
+        '{"type":"trivia","question":"Which planet is famous for its visible rings?","correctAnswer":"Saturn","acceptableAnswers":["Saturn"],"steps":[]}'::jsonb
       ) into v_session;
       perform set_config('test.user_b_session', v_session::text, true);
     end
@@ -275,6 +288,9 @@ select throws_ok(
 set local role postgres;
 
 -- Equal scores share a rank; username is only the display-order tiebreaker.
+-- reserve_play binds its trusted UID transaction-locally; this test shares
+-- one transaction, unlike separate HTTP RPCs, so explicitly restore A.
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
 select set_config(
   'request.jwt.claims',
   '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}',

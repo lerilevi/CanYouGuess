@@ -16,6 +16,7 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { getOfferings, purchasePackage, restorePurchases } from '@/services/purchasesService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { useAlert } from '@/template';
+import { captureIdentity, isCurrentIdentity } from '@/services/identityScope';
 
 interface PaywallScreenProps {
   visible: boolean;
@@ -43,29 +44,34 @@ export function PaywallScreen({ visible, onClose, trigger = 'category' }: Paywal
   }, [visible]);
 
   const loadOfferings = async () => {
+    const owner = captureIdentity();
     setLoadingOfferings(true);
     try {
       const result = await getOfferings();
+      if (!isCurrentIdentity(owner)) return;
       if (result?.current?.availablePackages) {
         setOfferings(result.current.availablePackages);
       } else {
         setOfferings([]);
       }
     } catch {
-      setOfferings([]);
+      if (isCurrentIdentity(owner)) setOfferings([]);
     } finally {
-      setLoadingOfferings(false);
+      if (isCurrentIdentity(owner)) setLoadingOfferings(false);
     }
   };
 
   const handlePurchase = async (pkg: unknown) => {
+    const owner = captureIdentity();
     const packageId = (pkg as any).identifier ?? 'unknown';
     setPurchasingId(packageId);
     const result = await purchasePackage(pkg);
+    if (!isCurrentIdentity(owner)) return;
     setPurchasingId(null);
 
     if (result.success) {
       await refreshPurchase();
+      if (!isCurrentIdentity(owner)) return;
       showAlert('Full Game Unlocked!', 'You now have lifetime access to all categories and unlimited questions. Enjoy!');
       onClose();
     } else if (result.error !== 'cancelled') {
@@ -74,13 +80,16 @@ export function PaywallScreen({ visible, onClose, trigger = 'category' }: Paywal
   };
 
   const handleRestore = async () => {
+    const owner = captureIdentity();
     setRestoring(true);
     const result = await restorePurchases();
+    if (!isCurrentIdentity(owner)) return;
     setRestoring(false);
 
     if (result.success) {
       if (result.isSubscribed) {
         await refreshPurchase();
+        if (!isCurrentIdentity(owner)) return;
         showAlert('Purchase Restored!', 'Your Full Game access has been restored. Welcome back!');
         onClose();
       } else {

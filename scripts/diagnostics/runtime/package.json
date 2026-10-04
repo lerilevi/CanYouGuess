@@ -1,0 +1,1 @@
+{"private":true,"description":"Isolated offline PostgreSQL test runtime; not an app dependency","dependencies":{"@electric-sql/pglite":"0.3.14"}}

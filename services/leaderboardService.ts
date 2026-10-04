@@ -1,4 +1,5 @@
-import { getSupabaseClient } from '@/template';
+import { ownedRpc } from './ownedBackend';
+import { captureIdentity } from './identityScope';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -13,42 +14,45 @@ export interface LeaderboardEntry {
 export type TimeFilter = 'daily' | 'weekly' | 'all_time';
 export type ScopeFilter = 'local' | 'global';
 
+/** Maps the UI's filter names onto the p_window argument of the RPCs. */
+function toWindow(timeFilter: TimeFilter): 'daily' | 'weekly' | 'all_time' {
+  return timeFilter;
+}
+
+interface LeaderboardRow {
+  rank: number;
+  user_id: string;
+  username: string;
+  country: string | null;
+  score: number;
+}
+
 export const getLeaderboard = async (
   timeFilter: TimeFilter,
   scopeFilter: ScopeFilter,
   userCountry: string | null,
   limit = 10
 ): Promise<LeaderboardEntry[]> => {
-  const supabase = getSupabaseClient();
+  const scope = captureIdentity();
 
-  let query = supabase
-    .from('leaderboard_scores')
-    .select('user_id, username, total_score, daily_score, weekly_score, country');
+  const data = await ownedRpc<LeaderboardRow[]>('get_leaderboard', {
+    p_window: toWindow(timeFilter),
+    p_country: scopeFilter === 'local' ? userCountry : null,
+    p_limit: limit,
+    p_offset: 0,
+  }, scope);
 
-  if (scopeFilter === 'local' && userCountry) {
-    query = query.eq('country', userCountry);
-  }
-
-  const scoreField =
-    timeFilter === 'daily' ? 'daily_score' :
-    timeFilter === 'weekly' ? 'weekly_score' : 'total_score';
-
-  query = query.order(scoreField, { ascending: false }).limit(limit);
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('Leaderboard error:', error);
-    return [];
-  }
-
-  return (data ?? []).map((entry, idx) => ({
-    rank: idx + 1,
-    user_id: entry.user_id,
-    username: entry.username,
-    total_score: entry.total_score,
-    daily_score: entry.daily_score,
-    weekly_score: entry.weekly_score,
-    country: entry.country,
+  // The RPC returns one `score` for the requested window. The legacy
+  // LeaderboardEntry shape carries three score fields, so the active one is
+  // filled and the others zeroed — the UI only reads the one it asked for.
+  return ((data ?? []) as LeaderboardRow[]).map((row) => ({
+    rank: Number(row.rank),
+    user_id: row.user_id,
+    username: row.username,
+    country: row.country,
+    total_score: timeFilter === 'all_time' ? row.score : 0,
+    daily_score: timeFilter === 'daily' ? row.score : 0,
+    weekly_score: timeFilter === 'weekly' ? row.score : 0,
   }));
 };
 
@@ -58,30 +62,18 @@ export const getUserRank = async (
   scopeFilter: ScopeFilter,
   userCountry: string | null
 ): Promise<{ rank: number; score: number } | null> => {
-  const supabase = getSupabaseClient();
+  const scope = captureIdentity(userId);
 
-  const scoreField =
-    timeFilter === 'daily' ? 'daily_score' :
-    timeFilter === 'weekly' ? 'weekly_score' : 'total_score';
+  const data = await ownedRpc<{rank:number;score:number}[]>('get_user_rank', {
+    p_user_id: userId,
+    p_window: toWindow(timeFilter),
+    p_country: scopeFilter === 'local' ? userCountry : null,
+  }, scope);
 
-  let query = supabase
-    .from('leaderboard_scores')
-    .select('user_id, ' + scoreField);
+  // No row means the user has no score in this window — genuinely unranked,
+  // which the caller must not render as rank 0.
+  const row = (data as { rank: number; score: number }[] | null)?.[0];
+  if (!row) return null;
 
-  if (scopeFilter === 'local' && userCountry) {
-    query = query.eq('country', userCountry);
-  }
-
-  query = query.order(scoreField, { ascending: false });
-
-  const { data } = await query;
-  if (!data) return null;
-
-  const idx = data.findIndex((e) => e.user_id === userId);
-  if (idx === -1) return null;
-
-  return {
-    rank: idx + 1,
-    score: (data[idx] as Record<string, unknown>)[scoreField] as number,
-  };
+  return { rank: Number(row.rank), score: row.score };
 };

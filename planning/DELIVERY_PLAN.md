@@ -22,7 +22,7 @@ The user approved an explicit empty beta reset (no real users/purchases to migra
 
 Reward target: 15 free daily questions plus **one bonus question per verified rewarded ad**, with no player-visible daily cap. Reward value, cooldown and technical abuse/spend ceilings are server-configurable; the former 15+3 proposal is superseded. Unlimited lifetime-play store/Terms promises are blocked pending economics findings. Adults-only (18+) first beta is now approved. Global English-speaking eligibility is a proposed reach, not clearance for every country/provider combination.
 
-Latest decisions supersede earlier proposals: ranked mode is postponed until after the independent idea comparison; email-signup choice and domain purchase are on hold; the native batch remains unapproved. [Independent identity/day/question assessment](INDEPENDENT_ASSESSMENT_2026-10-04.md) records seven offline reproductions, a proposed isolation repair (not applied), guest-first versus email tradeoffs, UTC versus local-date competition windows and a proposed $2/28-question pilot. No paid samples or new builds were run.
+Latest decisions supersede earlier proposals: guest-first with CAPTCHA, early recovery linking and deletion is approved; local-midnight allowance/streak with validated timezone and anti-hopping is approved; the isolation repair and $2/28-question/80-attempt pilot are approved. Ranked mode and domain/SMTP remain on hold; the native batch remains unapproved. [Independent assessment](INDEPENDENT_ASSESSMENT_2026-10-04.md) preserves the pre-repair diagnosis. [Approved work and exact batch](APPROVED_WORK_AND_NATIVE_BATCH_2026-10-04.md) records the local repair, target deployment/device gates and Apple recovery recommendation. [Bank and pilot plan](QUESTION_BANK_AND_PILOT_2026-10-04.md) records realistic reviewer capacity and the hosted-access blocker. No paid samples, native dependency changes or new builds were run.
 
 Detailed proposed contracts and outstanding approvals: [decisions and contracts](DECISIONS_AND_CONTRACTS_2026-10-04.md). Domain/DNS and Windows-to-iPhone registration instructions: [setup guide](EMAIL_AND_IPHONE_SETUP.md). These documents are design/instructions, not deployed functionality. **No Phase 2 builds before approval of the exact native batch list.**
 
@@ -79,7 +79,7 @@ Needed: Sentry organization/project, DSN, desired data region, alert recipient, 
 
 ## SMTP and auth
 
-On hold: the user is considering removing mandatory email signup and will not buy a domain until the identity decision. The instructions below remain conditional, not a purchase/configuration request. Guest-first auth still needs recovery/deletion/abuse policy; optional email linking would require delivery setup later.
+Superseded: guest-first is now approved and Sign in with Apple is recommended for early recovery. No email/SMTP system or domain purchase is needed for the current plan. The historical instructions below remain conditional only if email is chosen later; they are not a purchase/configuration request.
 
 Custom SMTP is a real signup prerequisite. Supabase's default sender restricts recipients to organization members and currently documents a two-message/hour limit. Installing SMTP does not itself fix OTP length, templates, recovery routing or email-change verification. [Supabase SMTP](https://supabase.com/docs/guides/auth/auth-smtp)
 

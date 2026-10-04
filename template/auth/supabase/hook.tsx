@@ -4,6 +4,8 @@ import { AuthContextType, SendOTPResult, AuthResult, LogoutResult, SignUpResult,
 import { authService } from './service';
 import { configManager } from '../../core/config';
 import { useAuthContext } from './context';
+import { beginIdentityTransition, getIdentityScope, setIdentity } from '@/services/identityScope';
+import { clearUserCaches } from '@/services/userCache';
 
 export function useAuth(): AuthContextType {
   const context = useAuthContext();
@@ -110,9 +112,18 @@ export function useAuth(): AuthContextType {
   };
 
   const logout = async (): Promise<LogoutResult> => {
+    const leaving = getIdentityScope();
+    const transition = beginIdentityTransition();
     context.setOperationLoading(true);
     try {
       const result = await authService.logout();
+      await clearUserCaches(leaving).catch(() => {});
+      if (result?.error && getIdentityScope() === transition) {
+        // A failed sign-out may leave the same authenticated account active.
+        // Restore only its identity, never its discarded UI state.
+        const retained = await authService.getCurrentUser();
+        if (getIdentityScope() === transition) setIdentity(retained?.id ?? null);
+      }
       
       if (!result) {
         console.warn('[Template:useAuth] Invalid logout result format:', result);
@@ -122,6 +133,10 @@ export function useAuth(): AuthContextType {
       return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown logout error';
+      if (getIdentityScope() === transition) {
+        const retained = await authService.getCurrentUser().catch(() => null);
+        if (getIdentityScope() === transition) setIdentity(retained?.id ?? null);
+      }
       console.warn('[Template:useAuth] Logout hook exception:', errorMessage);
       return { error: errorMessage };
     } finally {

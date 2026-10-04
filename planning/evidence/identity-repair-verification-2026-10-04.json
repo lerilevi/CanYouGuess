@@ -1,0 +1,35 @@
+{
+  "branch": "integration/onspace-exit",
+  "status": "locally-verified-not-deployed",
+  "checks": {
+    "mobileTypecheck": "passed",
+    "denoGatewayAndPilotCheck": "passed",
+    "localIosHermesExport": "passed; 1292 modules; no native compilation",
+    "historicalReproduction": "7 original defects reproduced from commit 5147578",
+    "currentIdentityRegression": "12 cases passed",
+    "ephemeralPostgresqlRegression": "6 groups passed",
+    "pilotBudgetRubricAndAliases": "8 groups passed",
+    "pilotDefaultNoRun": "passed; no provider requests",
+    "hostedPgtapAndEdgeSuite": "not run",
+    "multiSessionConcurrency": "not run",
+    "physicalDeviceAB": "pending approved development client and target cutover"
+  },
+  "easBuildsThisTurn": 0,
+  "hostedWritesThisTurn": 0,
+  "actualPilot": {
+    "upstreamGenerationAttempts": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "spendUSD": 0,
+    "corpusProduced": false,
+    "blocker": "Target Supabase project is not visible to current authenticated CLI account; actual hosted model not verified"
+  },
+  "limitations": [
+    "Integration client requires matching target backend migration and function; old backend and build 19 unchanged",
+    "Native SDK operations are stubbed in offline races, not actual device purchase tests",
+    "WASM PostgreSQL uses one connection; no claim of independent-session concurrency verification",
+    "Anonymous/CAPTCHA/Apple recovery and SSV/UMP rollout are planned, not shipped",
+    "Frozen numeric reference/unit/rubric fixes are structural; human/source validation remains required",
+    "No other reviewers' notes read; independent real-output findings await approved pilot access"
+  ]
+}

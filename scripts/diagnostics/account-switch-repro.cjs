@@ -3,10 +3,12 @@
  * and the installed reconciler; stub native/storage/network boundaries only.
  * No Supabase calls, AI calls, native SDK calls or production edits.
  * Fixtures below are synthetic, NOT an AI question-quality corpus.
+ * Replays the recorded pre-repair commit, not today's repaired working files.
  * Run: node scripts/diagnostics/account-switch-repro.cjs
  */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
@@ -20,7 +22,8 @@ const logs = [];
 
 function sourceModule(relative, mocks) {
   const filename = path.join(base, relative);
-  const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+  const before = execFileSync('git', ['show', `5147578:${relative}`], { cwd: base, encoding: 'utf8' });
+  const code = ts.transpileModule(before, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2022,

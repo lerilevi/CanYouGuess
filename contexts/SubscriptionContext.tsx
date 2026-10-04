@@ -1,43 +1,62 @@
-import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { checkIsSubscribed } from '@/services/purchasesService';
+import React, { createContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
+import { checkIsSubscribed, loginPurchasesUser, logoutPurchasesUser } from '@/services/purchasesService';
 import { useAuth } from '@/template';
+import { getIdentityScope, isCurrentIdentity, subscribeIdentity } from '@/services/identityScope';
 
 interface PurchaseContextType {
   isPaid: boolean;
   isLoading: boolean;
+  status: 'unknown' | 'free' | 'paid';
   refreshPurchase: () => Promise<void>;
 }
 
 export const SubscriptionContext = createContext<PurchaseContextType>({
   isPaid: false,
   isLoading: true,
+  status: 'unknown',
   refreshPurchase: async () => {},
 });
 
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [isPaid, setIsPaid] = useState(false);
+  const [paidState, setPaidState] = useState<{ owner: string | null; value: boolean | null }>({ owner: null, value: null });
   const [isLoading, setIsLoading] = useState(true);
+  const revision = useRef(0);
 
   const refreshPurchase = useCallback(async () => {
+    const scope = getIdentityScope();
+    const request = ++revision.current;
+    setPaidState({ owner: user?.id ?? null, value: null });
     setIsLoading(true);
     try {
-      // checkIsSubscribed checks RevenueCat entitlement — works for one-time non-consumable too
+      if (!user?.id) {
+        await logoutPurchasesUser();
+        return;
+      }
+      await loginPurchasesUser(user.id);
       const paid = await checkIsSubscribed();
-      setIsPaid(paid);
+      if (isCurrentIdentity(scope) && revision.current === request) setPaidState({ owner: user.id, value: paid });
     } catch {
-      setIsPaid(false);
+      // Unknown/retry is not a free entitlement and never retains another UID's paid value.
     } finally {
-      setIsLoading(false);
+      if (getIdentityScope() === scope && revision.current === request) setIsLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
-    refreshPurchase();
-  }, [user, refreshPurchase]);
+    void refreshPurchase();
+    const unsubscribe = subscribeIdentity(() => {
+      revision.current++;
+      setPaidState({ owner: null, value: null });
+      setIsLoading(true);
+    });
+    return () => { revision.current++; unsubscribe(); };
+  }, [refreshPurchase]);
+
+  const value = paidState.owner === user?.id ? paidState.value : null;
 
   return (
-    <SubscriptionContext.Provider value={{ isPaid, isLoading, refreshPurchase }}>
+    <SubscriptionContext.Provider value={{ isPaid: value === true, isLoading, status: value === null ? 'unknown' : value ? 'paid' : 'free', refreshPurchase }}>
       {children}
     </SubscriptionContext.Provider>
   );

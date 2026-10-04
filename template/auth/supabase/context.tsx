@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
 import { AuthUser } from '../types';
 import { authService } from './service';
+import { setIdentity } from '@/services/identityScope';
 
 interface AuthContextState {
   user: AuthUser | null;
@@ -31,6 +32,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   });
 
   const updateState = (updates: Partial<AuthContextState>) => {
+    if (Object.prototype.hasOwnProperty.call(updates, 'user')) setIdentity(updates.user?.id ?? null);
     setState(prevState => {
       const newState = { ...prevState, ...updates };
       return newState;
@@ -44,13 +46,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     let isMounted = true;
     let authSubscription: any = null;
+    let authRevision = 0;
 
     const initializeAuth = async () => {
       
       try {
+        // Subscribe before the initial asynchronous read; an old initial result
+        // must not overwrite a login/logout notification received meanwhile.
+        authSubscription = authService.onAuthStateChange((authUser) => {
+          authRevision++;
+          if (isMounted) updateState({ user: authUser, loading: false, initialized: true });
+        });
+        const readRevision = authRevision;
         const currentUser = await authService.getCurrentUser();
         
-        if (isMounted) {
+        if (isMounted && authRevision === readRevision) {
           updateState({ 
             user: currentUser, 
             loading: false, 
@@ -58,15 +68,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           });
         }
 
-        authSubscription = authService.onAuthStateChange((authUser) => {
-          if (isMounted) {
-            updateState({ user: authUser });
-          }
-        });
 
       } catch (error) {
         console.warn('[Template:AuthProvider] Auth initialization failed:', error);
-        if (isMounted) {
+        if (isMounted && authRevision === 0) {
           updateState({ 
             user: null, 
             loading: false, 

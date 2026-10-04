@@ -8,6 +8,7 @@
       ]
     }
   },
+  "exclude": ["supabase/functions", "scripts/diagnostics/runtime", "scripts/diagnostics/ai-pilot.ts"],
   "include": [
     "**/*.ts",
     "**/*.tsx",

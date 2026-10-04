@@ -28,7 +28,8 @@ import {
   deleteUserAccount,
   UserStats,
 } from '@/services/profileService';
-import { logoutPurchasesUser, restorePurchases } from '@/services/purchasesService';
+import { restorePurchases } from '@/services/purchasesService';
+import { captureIdentity, isCurrentIdentity } from '@/services/identityScope';
 import { showPrivacyOptionsForm } from '@/services/adService';
 import { BADGES } from '@/constants/config';
 import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constants/theme';
@@ -45,7 +46,7 @@ export default function ProfileTab() {
   const { user, logout, refreshSession } = useAuth();
   const { showAlert } = useAlert();
   const { userBadges, loadUserData } = useGame();
-  const { isPaid, refreshPurchase } = useSubscriptionStatus();
+  const { isPaid, status: purchaseStatus, refreshPurchase } = useSubscriptionStatus();
 
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
@@ -61,32 +62,39 @@ export default function ProfileTab() {
   const [editLoading, setEditLoading] = useState(false);
 
   useEffect(() => {
+    let active = true;
+    setStats(null);
     if (user) {
+      const owner = captureIdentity(user.id);
       setLoadingStats(true);
       getOrCreateUserStats(user.id)
-        .then(setStats)
-        .finally(() => setLoadingStats(false));
+        .then(value => { if (active && isCurrentIdentity(owner)) setStats(value); })
+        .catch(() => { if (active && isCurrentIdentity(owner)) setStats(null); })
+        .finally(() => { if (active && isCurrentIdentity(owner)) setLoadingStats(false); });
     }
+    return () => { active = false; };
   }, [user]);
 
   const handleLogout = async () => {
+    const owner = captureIdentity();
     showAlert('Log Out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log Out',
         style: 'destructive',
         onPress: async () => {
+          if (!isCurrentIdentity(owner)) return;
           setLoggingOut(true);
-          await logoutPurchasesUser();
           const { error } = await logout();
           setLoggingOut(false);
-          if (error) showAlert('Error', error);
+          if (error && isCurrentIdentity(owner)) showAlert('Error', error);
         },
       },
     ]);
   };
 
   const handleDeleteAccount = async () => {
+    const owner = captureIdentity();
     showAlert(
       'Delete Account',
       'This will permanently delete your account and all data. This action cannot be undone.',
@@ -96,6 +104,7 @@ export default function ProfileTab() {
           text: 'Delete Forever',
           style: 'destructive',
           onPress: async () => {
+            if (!isCurrentIdentity(owner)) return;
             showAlert(
               'Are You Sure?',
               'Your scores, streaks, badges, and leaderboard entries will be permanently removed.',
@@ -105,14 +114,15 @@ export default function ProfileTab() {
                   text: 'Yes, Delete',
                   style: 'destructive',
                   onPress: async () => {
-                    await logoutPurchasesUser();
-                    const { error } = await deleteUserAccount();
-                    if (error) {
+                    if (!isCurrentIdentity(owner)) return;
+                    let error: string | null;
+                    try { ({ error } = await deleteUserAccount()); }
+                    catch { if (!isCurrentIdentity(owner)) return; error = 'Deletion failed'; }
+                    if (error && isCurrentIdentity(owner)) {
                       showAlert('Error', 'Could not delete your account. Please try again.');
                       return;
                     }
-                    // Session is already cleared server-side; call logout to clean up locally.
-                    await logout();
+                    // Deletion signs out its captured owner. Never sign out a newer account here.
                   },
                 },
               ]
@@ -124,12 +134,15 @@ export default function ProfileTab() {
   };
 
   const handleRestorePurchase = async () => {
+    const owner = captureIdentity();
     setRestoring(true);
     const result = await restorePurchases();
+    if (!isCurrentIdentity(owner)) return;
     setRestoring(false);
     if (result.success) {
       if (result.isSubscribed) {
         await refreshPurchase();
+        if (!isCurrentIdentity(owner)) return;
         showAlert('Purchase Restored!', 'Your Full Game access has been restored.');
       } else {
         showAlert('No Purchase Found', 'We could not find a previous "Unlock Full Game" purchase on this account.');
@@ -150,6 +163,7 @@ export default function ProfileTab() {
 
   const handleSaveEdit = async () => {
     if (!user || !editField) return;
+    const owner = captureIdentity(user.id);
     if (!editValue.trim()) {
       showAlert('Error', 'Please enter a value.');
       return;
@@ -169,6 +183,7 @@ export default function ProfileTab() {
     setEditLoading(true);
     let result: { error: string | null } = { error: null };
 
+    try {
     if (editField === 'username') {
       result = await updateUsername(user.id, editValue.trim());
     } else if (editField === 'email') {
@@ -176,6 +191,11 @@ export default function ProfileTab() {
     } else if (editField === 'password') {
       result = await updatePassword(editValue);
     }
+    } catch {
+      if (!isCurrentIdentity(owner)) return;
+      result = { error: 'Account update failed. Please retry.' };
+    }
+    if (!isCurrentIdentity(owner)) return;
 
     setEditLoading(false);
 
@@ -190,7 +210,7 @@ export default function ProfileTab() {
       );
       setEditField(null);
       await refreshSession();
-      loadUserData();
+      if (isCurrentIdentity(owner)) void loadUserData();
     }
   };
 
@@ -222,7 +242,11 @@ export default function ProfileTab() {
             <Text style={styles.email}>{user?.email}</Text>
 
             {/* Access status pill */}
-            {isPaid ? (
+            {purchaseStatus === 'unknown' ? (
+              <Pressable onPress={() => void refreshPurchase()} style={styles.accessPillFree}>
+                <Text style={styles.accessPillFreeText}>Checking access · Tap to retry</Text>
+              </Pressable>
+            ) : isPaid ? (
               <View style={styles.accessPillPaid}>
                 <MaterialIcons name="star" size={12} color={Colors.secondary} />
                 <Text style={styles.accessPillPaidText}>Full Game Unlocked</Text>
@@ -377,8 +401,10 @@ export default function ProfileTab() {
 
             <Pressable
               onPress={async () => {
+                const owner = captureIdentity();
                 setPrivacyOptionsLoading(true);
                 const result = await showPrivacyOptionsForm();
+                if (!isCurrentIdentity(owner)) return;
                 setPrivacyOptionsLoading(false);
                 if (result.error) {
                   showAlert('Not Available', 'Ad preference settings are not available in your region or have not been set up yet.');
